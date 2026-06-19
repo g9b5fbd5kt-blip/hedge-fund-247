@@ -1,0 +1,5 @@
+alpaca-trade-api==3.2.0
+matplotlib==3.8.2
+pandas==2.1.4
+requests==2.31.0
+pytz==2023.3
