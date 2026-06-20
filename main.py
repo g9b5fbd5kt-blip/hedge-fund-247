@@ -1,6 +1,6 @@
 """
-v2.0 Money Printer Pro - Boss Trading System
-Fixed for crypto time_in_force
+v2.0 Money Printer Pro - with HOLD notifications
+Fixed TELEGRAM_TOKEN variable name
 """
 
 import os
@@ -20,7 +20,7 @@ from alpaca.data.timeframe import TimeFrame
 
 ALPACA_KEY = os.getenv("APCA_API_KEY_ID")
 ALPACA_SECRET = os.getenv("APCA_API_SECRET_KEY")
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN") # FIXED: matches your Railway
 TELEGRAM_CHAT = os.getenv("TELEGRAM_CHAT_ID")
 
 PAPER = True
@@ -46,6 +46,8 @@ CRYPTO = ["BTC/USD", "ETH/USD", "SOL/USD", "AVAX/USD", "DOGE/USD"]
 
 last_api_call = 0
 API_DELAY = 0.35
+last_hold_ping = 0
+HOLD_PING_INTERVAL = 300 # Ping HOLD status every 5 minutes max
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("Boss")
@@ -89,6 +91,7 @@ def send_telegram(text, chart_url=None):
         url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
         data = {"chat_id": TELEGRAM_CHAT, "text": msg, "parse_mode": "HTML", "disable_web_page_preview": False}
         requests.post(url, data=data, timeout=10)
+        logger.info(f"Telegram sent: {text[:50]}...")
         time.sleep(0.2)
     except Exception as e:
         logger.error(f"Telegram error: {e}")
@@ -179,6 +182,7 @@ class Boss:
         self.last_learning = datetime.now()
 
     def scan(self):
+        global last_hold_ping
         account = get_account()
         if not account:
             return
@@ -186,27 +190,45 @@ class Boss:
         now_et = datetime.now(pytz.timezone('US/Eastern'))
         market_open = now_et.weekday() < 5 and 9 <= now_et.hour < 16
         opportunities = []
+        all_analyses = []
 
         for symbol in CRYPTO:
             analysis = self.analyst.analyze(symbol)
+            all_analyses.append({"symbol": symbol, **analysis})
             if analysis["score"] > 70:
                 opportunities.append({"symbol": symbol, "score": analysis["score"], "price": analysis["price"], "type": "crypto", "action": analysis["action"]})
 
         if market_open:
             for symbol in STOCKS:
                 analysis = self.analyst.analyze(symbol)
+                all_analyses.append({"symbol": symbol, **analysis})
                 if analysis["score"] > 70:
                     opportunities.append({"symbol": symbol, "score": analysis["score"], "price": analysis["price"], "type": "stock", "action": analysis["action"]})
 
         opportunities.sort(key=lambda x: x["score"], reverse=True)
+        all_analyses.sort(key=lambda x: x["score"], reverse=True)
 
+        traded = False
         if opportunities:
             top = opportunities[0]
             approved, reason = self.risk.check(top["symbol"], account, positions)
             if approved:
                 self.execute_trade(top, account)
+                traded = True
+            else:
+                # Ping when high score but blocked
+                msg = f"🚫 <b>HOLD - Risk Blocked</b>\n\n• {top['symbol']} Score: {top['score']}/100\n• Reason: {reason}\n• Price: ${top['price']:.2f}"
+                send_telegram(msg, tradingview_chart(top['symbol']))
 
         self.check_exits(positions)
+
+        # Ping HOLD status every 5 minutes if no trade
+        if not traded and time.time() - last_hold_ping > HOLD_PING_INTERVAL:
+            if all_analyses:
+                top = all_analyses[0]
+                msg = f"👀 <b>SCANNING - HOLDING</b>\n\n• Watching: {top['symbol']}\n• Score: {top['score']}/100 (need 70+)\n• RSI: {top.get('rsi', 0)}\n• Action: {top['action']}\n• Positions: {len(positions)}/3"
+                send_telegram(msg)
+                last_hold_ping = time.time()
 
         if (datetime.now() - self.last_learning).seconds > 3600:
             self.learn()
@@ -236,7 +258,7 @@ class Boss:
             conn.commit()
 
             chart = tradingview_chart(symbol)
-            msg = f"🤖 <b>BOSS EXECUTED</b>\n\n• {symbol} x{qty}\n• ${price:.2f} (${size:.0f})\n• Score: {opp['score']}/100"
+            msg = f"🤖 <b>BOSS EXECUTED BUY</b>\n\n• {symbol} x{qty}\n• ${price:.2f} (${size:.0f})\n• Score: {opp['score']}/100"
             send_telegram(msg, chart)
         except Exception as e:
             logger.error(f"Execute error: {e}")
@@ -267,7 +289,7 @@ class Boss:
                         reserve_amount = pnl * PROFIT_RESERVE_PCT
                         c.execute("INSERT INTO reserve VALUES (NULL,?,?,?)", (datetime.now().isoformat(), reserve_amount, 0))
                         conn.commit()
-                    msg = f"💰 <b>EXITED</b>\n\n• {symbol}\n• {reason}\n• PnL: ${pnl:.2f}"
+                    msg = f"💰 <b>BOSS EXECUTED SELL</b>\n\n• {symbol}\n• {reason}\n• PnL: ${pnl:.2f}"
                     send_telegram(msg)
             except Exception as e:
                 logger.error(f"Exit error: {e}")
@@ -314,7 +336,7 @@ def evening_summary():
 
 def main():
     logger.info("Boss v2.0 starting")
-    send_telegram("🤖 <b>BOSS v2.0 ONLINE</b>\n\nPaper trading active")
+    send_telegram("🤖 <b>BOSS v2.0 ONLINE</b>\n\nPaper trading active\n\nPinging on BUY, SELL, and HOLD decisions")
     boss = Boss()
     last_morning = None
     last_evening = None
