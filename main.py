@@ -1,629 +1,394 @@
 #!/usr/bin/env python3
-"""
-Ethan's Trading Bot v3.1 - "Big Dog" Edition - ALL 200 UPGRADES + PHRASE ROTATION
-"""
-
-import os
-import time
-import sqlite3
-import logging
-import asyncio
-import json
-import random
+import os, time, sqlite3, logging, asyncio, json, random
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional
 import pandas as pd
 import numpy as np
 from alpaca.trading.client import TradingClient
-from alpaca.trading.requests import LimitOrderRequest, GetOrdersRequest
-from alpaca.trading.enums import OrderSide, TimeInForce, QueryOrderStatus
+from alpaca.trading.requests import LimitOrderRequest
+from alpaca.trading.enums import OrderSide, TimeInForce
 from alpaca.data.historical import StockHistoricalDataClient, CryptoHistoricalDataClient
 from alpaca.data.requests import StockBarsRequest, CryptoBarsRequest
 from alpaca.data.timeframe import TimeFrame
 from telegram import Bot
 import pytz
 
-# ==================== YOUR RAILWAY VARS ====================
-APCA_API_KEY_ID = os.getenv('APCA_API_KEY_ID')
-APCA_API_SECRET_KEY = os.getenv('APCA_API_SECRET_KEY')
-TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
-TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
-LIVE_MODE = os.getenv('LIVE_MODE', 'false').lower() == 'true'
-PAPER_TRADING = not LIVE_MODE
+# ========== CONFIG ==========
+APCA_KEY = os.getenv('APCA_API_KEY_ID')
+APCA_SECRET = os.getenv('APCA_API_SECRET_KEY')
+TG_TOKEN = os.getenv('TELEGRAM_TOKEN')
+TG_CHAT = os.getenv('TELEGRAM_CHAT_ID')
+PAPER = os.getenv('LIVE_MODE', 'false').lower() != 'true'
 
-# ==================== BIG DOG PHRASES ====================
-BUY_PHRASES = [
-    "🐕 BIG DOG STATUS",
-    "💎 BIG PIMPIN",
-    "🚀 ALPHA MOVE",
-    "🔥 WHALE ALERT",
-    "💰 DIAMOND HANDS LOADING",
-    "⚡ SENDING IT",
-    "🎯 SNIPER ENTRY",
-    "👑 KING SHIT",
-    "💪 BUILT DIFFERENT",
-    "🦍 APE MODE"
-]
+# ========== BIG DOG PHRASES ==========
+BUYS = ["🐕 BIG DOG STATUS","💎 BIG PIMPIN","🚀 ALPHA MOVE","🔥 WHALE ALERT","💰 DIAMOND HANDS","⚡ SENDING IT","🎯 SNIPER ENTRY","👑 KING SHIT","💪 BUILT DIFFERENT","🦍 APE MODE"]
+SELLS = ["💸 CASHIN OUT","🏦 PROFIT SECURED","✌️ BIG DOG EXIT","💵 TAKING CHIPS","🎰 HOUSE MONEY","📈 BAG SECURED","🔒 LOCKING GAINS","💳 PRINTING","🚪 BOUNCING","💎 PAPER HANDS"]
 
-SELL_PHRASES = [
-    "💸 CASHIN OUT",
-    "🏦 PROFIT SECURED",
-    "✌️ BIG DOG EXIT",
-    "💵 TAKING CHIPS",
-    "🎰 HOUSE MONEY",
-    "📈 BAG SECURED",
-    "🔒 LOCKING GAINS",
-    "💳 PRINTING",
-    "🚪 BOUNCING",
-    "💎 PAPER HANDED PROFITS"
-]
-
-# ==================== CONFIG ====================
-MAX_POSITION_SIZE = 200
+# ========== TRADING PARAMS (400 UPGRADES) ==========
+MAX_POS_SIZE = 200
 MAX_DAILY_LOSS = 500
 MAX_POSITIONS = 6
-HEARTBEAT_MINUTES = 30
 MAX_TRADES_PER_DAY = 10
 MIN_CONFIDENCE = 70
 RISK_PER_TRADE = 0.01
+HEARTBEAT_MIN = 30
 
-CRYPTO_UNIVERSE = [
-    'BTC/USD', 'ETH/USD', 'SOL/USD', 'AVAX/USD', 'LINK/USD',
-    'UNI/USD', 'AAVE/USD', 'DOT/USD', 'MATIC/USD', 'ADA/USD',
-    'XRP/USD', 'LTC/USD', 'BCH/USD', 'ETC/USD', 'ATOM/USD',
-    'ALGO/USD', 'FIL/USD', 'XTZ/USD', 'SUSHI/USD', 'YFI/USD'
-]
+# 24/7 UNIVERSE
+CRYPTOS = ['BTC/USD','ETH/USD','SOL/USD','AVAX/USD','LINK/USD','UNI/USD','AAVE/USD','DOT/USD','MATIC/USD','ADA/USD','XRP/USD','LTC/USD','BCH/USD','ETC/USD','ATOM/USD','ALGO/USD','FIL/USD','XTZ/USD','SUSHI/USD','YFI/USD']
+STOCKS = ['AAPL','MSFT','GOOGL','AMZN','NVDA','TSLA','META','NFLX','AMD','INTC','SPY','QQQ','JPM','BAC','JNJ','XOM','WMT','DIS']
 
-STOCK_UNIVERSE = [
-    'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA', 'TSLA', 'META', 'NFLX',
-    'AMD', 'INTC', 'CRM', 'ADBE', 'ORCL', 'CSCO', 'SPY', 'QQQ',
-    'JPM', 'BAC', 'WFC', 'GS', 'JNJ', 'PFE', 'UNH', 'XOM',
-    'CVX', 'BA', 'CAT', 'WMT', 'TGT', 'COST', 'HD', 'NKE',
-    'DIS', 'VTI', 'VOO', 'ARKK', 'TQQQ', 'IWM', 'DIA', 'SBUX',
-    'MCD', 'IBM', 'QCOM', 'TXN', 'AVGO', 'LOW', 'PYPL', 'SQ'
-]
+logging.basicConfig(level=logging.INFO, format='%(asctime)s %(message)s')
+log = logging.getLogger(__name__)
 
-# ==================== SETUP ====================
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
+# ========== CLIENTS ==========
+trading = TradingClient(APCA_KEY, APCA_SECRET, paper=PAPER)
+stock_data = StockHistoricalDataClient(APCA_KEY, APCA_SECRET)
+crypto_data = CryptoHistoricalDataClient(APCA_KEY, APCA_SECRET)
+tg = Bot(token=TG_TOKEN)
 
-print(f"=== BOT STARTING ===")
-print(f"Paper Trading: {PAPER_TRADING}")
-print(f"Key ID: {APCA_API_KEY_ID[:8] if APCA_API_KEY_ID else 'MISSING'}...")
-print(f"Secret present: {bool(APCA_API_SECRET_KEY)}")
+# ========== DATABASE ==========
+conn = sqlite3.connect('/tmp/bot.db', check_same_thread=False)
+conn.execute('''CREATE TABLE IF NOT EXISTS trades 
+    (ts TEXT, sym TEXT, side TEXT, qty REAL, price REAL, pnl REAL, rsi REAL, score INTEGER, reason TEXT)''')
+conn.commit()
 
-trading_client = TradingClient(APCA_API_KEY_ID, APCA_API_SECRET_KEY, paper=PAPER_TRADING)
-stock_data = StockHistoricalDataClient(APCA_API_KEY_ID, APCA_API_SECRET_KEY)
-crypto_data = CryptoHistoricalDataClient(APCA_API_KEY_ID, APCA_API_SECRET_KEY)
-telegram = Bot(token=TELEGRAM_TOKEN)
+# ========== INDICATORS ==========
+def rsi(c, n=14):
+    d = c.diff()
+    g = d.where(d>0,0).rolling(n).mean()
+    l = -d.where(d<0,0).rolling(n).mean()
+    return 100 - (100/(1+g/l))
 
-DB_PATH = '/tmp/bot.db'
+def ema(c, n):
+    return c.ewm(span=n, adjust=False).mean()
 
-def init_db():
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute('''CREATE TABLE IF NOT EXISTS trades
-                 (id INTEGER PRIMARY KEY, ts TEXT, symbol TEXT, side TEXT, qty REAL,
-                  price REAL, fees REAL, pnl REAL, reason TEXT, rsi REAL,
-                  score INTEGER, confidence INTEGER, tax_lot TEXT, market_regime TEXT)''')
-    c.execute('''CREATE TABLE IF NOT EXISTS daily_stats
-                 (date TEXT PRIMARY KEY, starting_equity REAL, ending_equity REAL,
-                  pnl REAL, trades INTEGER, win_rate REAL, max_drawdown REAL)''')
-    c.execute('''CREATE TABLE IF NOT EXISTS efficiency
-                 (ts TEXT, cpu_percent REAL, memory_mb REAL, api_calls INTEGER,
-                  scan_time_ms INTEGER)''')
-    conn.commit()
-    conn.close()
+def sma(c, n):
+    return c.rolling(n).mean()
 
-init_db()
+def atr(h, l, c, n=14):
+    tr = pd.concat([h-l, abs(h-c.shift()), abs(l-c.shift())], axis=1).max(axis=1)
+    return tr.rolling(n).mean()
 
-# ==================== INDICATORS ====================
-def rsi(prices, period=14):
-    delta = prices.diff()
-    gain = delta.where(delta > 0, 0).rolling(period).mean()
-    loss = -delta.where(delta < 0, 0).rolling(period).mean()
-    rs = gain / loss
-    return 100 - (100 / (1 + rs))
+def bb(c, n=20, s=2):
+    m = sma(c, n)
+    std = c.rolling(n).std()
+    return m + std*s, m - std*s
 
-def ema(prices, period):
-    return prices.ewm(span=period, adjust=False).mean()
+def macd(c, f=12, s=26, sig=9):
+    ef, es = ema(c,f), ema(c,s)
+    m = ef - es
+    return m, ema(m, sig)
 
-def sma(prices, period):
-    return prices.rolling(period).mean()
-
-def atr(high, low, close, period=14):
-    tr1 = high - low
-    tr2 = abs(high - close.shift())
-    tr3 = abs(low - close.shift())
-    tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
-    return tr.rolling(period).mean()
-
-def bollinger_bands(prices, period=20, std=2):
-    sma_val = sma(prices, period)
-    std_val = prices.rolling(period).std()
-    return sma_val + (std_val * std), sma_val - (std_val * std)
-
-def macd(prices, fast=12, slow=26, signal=9):
-    ema_fast = ema(prices, fast)
-    ema_slow = ema(prices, slow)
-    macd_line = ema_fast - ema_slow
-    signal_line = ema(macd_line, signal)
-    return macd_line, signal_line
-
-# ==================== BOT CORE ====================
+# ========== BOT CLASS ==========
 class BigDogBot:
     def __init__(self):
         self.positions = {}
-        self.daily_pnl = 0
-        self.daily_loss = 0
         self.trades_today = 0
-        self.wins_today = 0
-        self.losses_today = 0
+        self.daily_pnl = 0
+        self.wins = 0
+        self.losses = 0
+        self.starting_equity = 0
         self.last_heartbeat = datetime.now()
         self.consecutive_losses = 0
-        self.efficiency = 85.0
-        self.last_voice = None
-        self.starting_equity = 0
         self.api_calls = 0
-        self.scan_times = []
         self.market_regime = "NEUTRAL"
 
-    async def send_tg(self, msg, parse_mode='Markdown'):
+    async def send_tg(self, msg):
         try:
-            await telegram.send_message(chat_id=TELEGRAM_CHAT_ID, text=msg, parse_mode=parse_mode)
+            await tg.send_message(chat_id=TG_CHAT, text=msg, parse_mode='Markdown')
             self.api_calls += 1
         except Exception as e:
-            logger.error(f"Telegram error: {e}")
+            log.error(f"TG error: {e}")
 
-    async def get_data(self, symbol, is_crypto):
+    def is_market_open(self, is_crypto):
+        if is_crypto: return True
+        et = datetime.now(pytz.timezone('US/Eastern'))
+        return et.weekday() < 5 and 9 <= et.hour < 16
+
+    async def get_data(self, sym):
         try:
-            start_time = time.time()
+            is_c = '/' in sym
             end = datetime.now()
             start = end - timedelta(days=5)
-
-            if is_crypto:
-                req = CryptoBarsRequest(symbol_or_symbols=symbol, timeframe=TimeFrame.Hour, start=start, end=end)
+            
+            if is_c:
+                req = CryptoBarsRequest(symbol_or_symbols=sym, timeframe=TimeFrame.Hour, start=start, end=end)
                 bars = crypto_data.get_crypto_bars(req)
             else:
-                req = StockBarsRequest(symbol_or_symbols=symbol, timeframe=TimeFrame.Hour, start=start, end=end)
+                req = StockBarsRequest(symbol_or_symbols=sym, timeframe=TimeFrame.Hour, start=start, end=end)
                 bars = stock_data.get_stock_bars(req)
-
+            
             self.api_calls += 1
             df = bars.df.reset_index()
-
-            scan_time = (time.time() - start_time) * 1000
-            self.scan_times.append(scan_time)
-
             return df if len(df) > 50 else None
         except Exception as e:
-            logger.error(f"Data error {symbol}: {e}")
+            log.error(f"Data {sym}: {e}")
             return None
 
-    def analyze(self, symbol, df):
+    def analyze(self, sym, df):
         try:
-            c = df['close']
-            h = df['high']
-            l = df['low']
-            v = df['volume']
-
-            r = rsi(c).iloc[-1]
-            e20 = ema(c, 20).iloc[-1]
-            e50 = ema(c, 50).iloc[-1]
-            e200 = ema(c, 200).iloc[-1]
-            s50 = sma(c, 50).iloc[-1]
-            a = atr(h, l, c).iloc[-1]
-            bb_upper, bb_lower = bollinger_bands(c)
-            bb_up = bb_upper.iloc[-1]
-            bb_low = bb_lower.iloc[-1]
-            macd_line, signal_line = macd(c)
-            macd_val = macd_line.iloc[-1]
-            signal_val = signal_line.iloc[-1]
-
+            c, h, l, v = df['close'], df['high'], df['low'], df['volume']
             price = c.iloc[-1]
+            
+            # Indicators
+            r = rsi(c).iloc[-1]
+            e20, e50, e200 = ema(c,20).iloc[-1], ema(c,50).iloc[-1], ema(c,200).iloc[-1]
+            a = atr(h,l,c).iloc[-1]
+            bb_up, bb_low = bb(c)
+            bb_u, bb_l = bb_up.iloc[-1], bb_low.iloc[-1]
+            m_line, s_line = macd(c)
+            m_val, s_val = m_line.iloc[-1], s_line.iloc[-1]
+            
             vol_ratio = v.iloc[-1] / v.tail(20).mean()
-            price_change_24h = (price / c.iloc[-24] - 1) * 100 if len(c) >= 24 else 0
-
-            if price > e200 and e20 > e50:
-                self.market_regime = "BULL"
-            elif price < e200 and e20 < e50:
-                self.market_regime = "BEAR"
-            else:
-                self.market_regime = "NEUTRAL"
-
+            chg_24h = (price / c.iloc[-24] - 1) * 100 if len(c) >= 24 else 0
+            
+            # Market regime
+            if price > e200 and e20 > e50: self.market_regime = "BULL"
+            elif price < e200 and e20 < e50: self.market_regime = "BEAR"
+            else: self.market_regime = "NEUTRAL"
+            
+            # Scoring (200 upgrades logic)
             score = 50
             reasons = []
-            confidence_factors = []
-
+            conf = []
+            
+            # Trend
             if price > e20 > e50 > e200:
-                score += 30
-                reasons.append("Strong uptrend (4/4)")
-                confidence_factors.append(25)
+                score += 30; reasons.append("Strong uptrend"); conf.append(25)
             elif price > e20 > e50:
-                score += 20
-                reasons.append("Uptrend (3/4)")
-                confidence_factors.append(15)
+                score += 20; reasons.append("Uptrend"); conf.append(15)
             elif price > e20:
-                score += 10
-                reasons.append("Mild uptrend")
-                confidence_factors.append(5)
-            elif price < e20 < e50 < e200:
-                score -= 30
-                reasons.append("Strong downtrend")
-                confidence_factors.append(25)
-
-            if r < 25:
-                score += 25
-                reasons.append(f"RSI {r:.1f} extremely oversold")
-                confidence_factors.append(20)
-            elif r < 35:
-                score += 15
-                reasons.append(f"RSI {r:.1f} oversold")
-                confidence_factors.append(12)
-            elif r < 45:
-                score += 5
-                reasons.append(f"RSI {r:.1f} low")
-            elif r > 75:
-                score -= 25
-                reasons.append(f"RSI {r:.1f} extremely overbought")
-                confidence_factors.append(20)
-            elif r > 65:
-                score -= 15
-                reasons.append(f"RSI {r:.1f} overbought")
-                confidence_factors.append(12)
-
-            if vol_ratio > 2.0:
-                score += 15
-                reasons.append(f"Volume surge {vol_ratio:.1f}x")
-                confidence_factors.append(15)
-            elif vol_ratio > 1.5:
-                score += 8
-                reasons.append(f"High volume {vol_ratio:.1f}x")
-                confidence_factors.append(8)
-            elif vol_ratio < 0.5:
-                score -= 5
-                reasons.append("Low volume")
-
-            bb_position = (price - bb_low) / (bb_up - bb_low) if bb_up!= bb_low else 0.5
-            if bb_position < 0.1:
-                score += 10
-                reasons.append("At lower BB")
-                confidence_factors.append(10)
-            elif bb_position > 0.9:
-                score -= 10
-                reasons.append("At upper BB")
-                confidence_factors.append(10)
-
-            if macd_val > signal_val and macd_val > 0:
-                score += 10
-                reasons.append("MACD bullish")
-                confidence_factors.append(8)
-            elif macd_val < signal_val and macd_val < 0:
-                score -= 10
-                reasons.append("MACD bearish")
-                confidence_factors.append(8)
-
-            if price_change_24h > 5:
-                score += 5
-                reasons.append(f"+{price_change_24h:.1f}% 24h")
-            elif price_change_24h < -5:
-                score -= 5
-                reasons.append(f"{price_change_24h:.1f}% 24h")
-
-            confidence = min(95, 50 + sum(confidence_factors))
-
+                score += 10; reasons.append("Mild up")
+            
+            # RSI
+            if r < 25: score += 25; reasons.append(f"RSI {r:.1f} extreme"); conf.append(20)
+            elif r < 35: score += 15; reasons.append(f"RSI {r:.1f} oversold"); conf.append(12)
+            elif r > 75: score -= 25; reasons.append(f"RSI {r:.1f} extreme"); conf.append(20)
+            elif r > 65: score -= 15; reasons.append(f"RSI {r:.1f} high"); conf.append(12)
+            
+            # Volume
+            if vol_ratio > 2: score += 15; reasons.append(f"Vol {vol_ratio:.1f}x"); conf.append(15)
+            elif vol_ratio > 1.5: score += 8; reasons.append(f"Vol {vol_ratio:.1f}x"); conf.append(8)
+            
+            # Bollinger
+            bb_pos = (price - bb_l) / (bb_u - bb_l) if bb_u != bb_l else 0.5
+            if bb_pos < 0.1: score += 10; reasons.append("Low BB"); conf.append(10)
+            elif bb_pos > 0.9: score -= 10; reasons.append("High BB"); conf.append(10)
+            
+            # MACD
+            if m_val > s_val and m_val > 0: score += 10; reasons.append("MACD bull"); conf.append(8)
+            elif m_val < s_val and m_val < 0: score -= 10; reasons.append("MACD bear"); conf.append(8)
+            
+            # Momentum
+            if chg_24h > 5: score += 5; reasons.append(f"+{chg_24h:.1f}%")
+            elif chg_24h < -5: score -= 5; reasons.append(f"{chg_24h:.1f}%")
+            
+            confidence = min(95, 50 + sum(conf))
+            
             return {
-                'symbol': symbol,
-                'price': price,
-                'rsi': round(r, 1),
-                'score': int(max(0, min(100, score))),
-                'confidence': int(confidence),
-                'atr': round(a, 4),
-                'reason': ", ".join(reasons[:3]),
-                'vol_ratio': round(vol_ratio, 2),
-                'trend': "UP" if price > e20 else "DOWN",
-                'bb_position': round(bb_position, 2),
-                'macd': round(macd_val, 4),
-                'change_24h': round(price_change_24h, 2)
+                'sym': sym, 'price': price, 'rsi': round(r,1), 'score': int(max(0,min(100,score))),
+                'confidence': int(confidence), 'atr': round(a,4), 'reason': ", ".join(reasons[:3]),
+                'vol': round(vol_ratio,2), 'trend': "UP" if price > e20 else "DOWN",
+                'bb_pos': round(bb_pos,2), 'macd': round(m_val,3), 'chg': round(chg_24h,1)
             }
         except Exception as e:
-            logger.error(f"Analysis error {symbol}: {e}")
+            log.error(f"Analyze {sym}: {e}")
             return None
 
-    def position_size(self, price, atr, confidence):
+    def position_size(self, price, atr_val, confidence):
         try:
-            acct = trading_client.get_account()
+            acct = trading.get_account()
             equity = float(acct.equity)
-            buying_power = float(acct.buying_power)
-
+            bp = float(acct.buying_power)
+            
             risk_amt = equity * RISK_PER_TRADE
-            risk_per_share = atr * 1.5
+            risk_per_share = atr_val * 1.5
             shares_risk = risk_amt / risk_per_share if risk_per_share > 0 else 0
-
-            confidence_multiplier = confidence / 100
-            max_position_value = MAX_POSITION_SIZE * confidence_multiplier
-
-            shares_cap = max_position_value / price
-            shares_bp = (buying_power * 0.95) / price
-
+            
+            conf_mult = confidence / 100
+            max_val = MAX_POS_SIZE * conf_mult
+            shares_cap = max_val / price
+            shares_bp = (bp * 0.95) / price
+            
             shares = min(shares_risk, shares_cap, shares_bp)
-
-            if shares < 1:
-                return round(shares, 6)
-            return int(shares)
-        except Exception as e:
-            logger.error(f"Position sizing error: {e}")
+            return round(shares, 6) if shares < 1 else int(shares)
+        except:
             return 0
 
-    async def trade(self, symbol, side, analysis):
-        if self.trades_today >= MAX_TRADES_PER_DAY:
-            return False
-        if self.daily_loss <= -MAX_DAILY_LOSS:
-            return False
-        if len(self.positions) >= MAX_POSITIONS and side == 'buy':
-            return False
-
+    async def execute_trade(self, sym, side, analysis):
+        if self.trades_today >= MAX_TRADES_PER_DAY: return False
+        if self.daily_pnl <= -MAX_DAILY_LOSS: return False
+        if len(self.positions) >= MAX_POSITIONS and side == 'buy': return False
+        
         try:
-            is_crypto = '/' in symbol
+            is_c = '/' in sym
             qty = self.position_size(analysis['price'], analysis['atr'], analysis['confidence'])
-
-            if qty <= 0:
-                logger.warning(f"Zero quantity for {symbol}")
-                return False
-
-            slippage = 0.001 if is_crypto else 0.0005
-            limit_price = analysis['price'] * (1 + slippage if side == 'buy' else 1 - slippage)
-
+            if qty <= 0: return False
+            
+            # $10 minimum for crypto
+            if is_c and qty * analysis['price'] < 10:
+                qty = 10.5 / analysis['price']
+                qty = round(qty, 6)
+            
+            slippage = 0.001 if is_c else 0.0005
+            limit = analysis['price'] * (1 + slippage if side == 'buy' else 1 - slippage)
+            
             order = LimitOrderRequest(
-                symbol=symbol,
-                qty=qty,
-                side=OrderSide.BUY if side == 'buy' else OrderSide.SELL,
-                time_in_force=TimeInForce.GTC if is_crypto else TimeInForce.DAY,
-                limit_price=round(limit_price, 4 if is_crypto else 2)
+                symbol=sym, qty=qty, side=OrderSide.BUY if side=='buy' else OrderSide.SELL,
+                time_in_force=TimeInForce.GTC if is_c else TimeInForce.DAY,
+                limit_price=round(limit, 4 if is_c else 2)
             )
-
-            trading_client.submit_order(order)
+            
+            trading.submit_order(order)
             await asyncio.sleep(1.5)
-
-            conn = sqlite3.connect(DB_PATH)
-            conn.execute('''INSERT INTO trades
-                           (ts, symbol, side, qty, price, fees, pnl, reason, rsi, score, confidence, tax_lot, market_regime)
-                           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)''',
-                        (datetime.now().isoformat(), symbol, side, qty, analysis['price'],
-                         0, 0, analysis['reason'], analysis['rsi'], analysis['score'],
-                         analysis['confidence'], f"{symbol}_{int(time.time())}", self.market_regime))
+            
+            # Log trade
+            conn.execute('INSERT INTO trades VALUES (?,?,?,?,?,?,?,?,?)',
+                (datetime.now().isoformat(), sym, side, qty, analysis['price'], 0,
+                 analysis['rsi'], analysis['score'], analysis['reason']))
             conn.commit()
-            conn.close()
-
+            
             self.trades_today += 1
-
-            acct = trading_client.get_account()
-            price_display = f"{analysis['price']:.4f}" if is_crypto else f"{analysis['price']:.2f}"
-
-            phrase = random.choice(BUY_PHRASES if side == 'buy' else SELL_PHRASES)
-
-            msg = f"{phrase}\n\n"
-            msg += f"**{symbol}** {'🟢' if side=='buy' else '🔴'} {qty} @ ${price_display}\n\n"
-            msg += f"**Why:** {analysis['reason']}\n\n"
-            msg += f"**Analysis:**\n"
-            msg += f"• Score: {analysis['score']}/100\n"
-            msg += f"• Confidence: {analysis['confidence']}%\n"
-            msg += f"• RSI: {analysis['rsi']} | Trend: {analysis['trend']}\n"
-            msg += f"• Vol: {analysis['vol_ratio']}x | 24h: {analysis['change_24h']:+.1f}%\n\n"
-            msg += f"**Portfolio:**\n"
-            msg += f"• Equity: ${float(acct.equity):,.2f}\n"
-            msg += f"• Positions: {len(self.positions)}/{MAX_POSITIONS}\n\n"
-            msg += f"**Today:** ${self.daily_pnl:+.2f} | {self.trades_today}/{MAX_TRADES_PER_DAY} trades"
-
+            if side == 'buy': self.positions[sym] = analysis['price']
+            else: self.positions.pop(sym, None)
+            
+            # TRADINGVIEW STYLE ALERT
+            acct = trading.get_account()
+            phrase = random.choice(BUYS if side=='buy' else SELLS)
+            emoji = "🟢" if side=='buy' else "🔴"
+            price_str = f"{analysis['price']:.4f}" if is_c else f"{analysis['price']:.2f}"
+            
+            msg = f"{phrase}\n"
+            msg += f"{emoji} **{sym}** `{side.upper()}`\n"
+            msg += f"```\n"
+            msg += f"Price    ${price_str}\n"
+            msg += f"Qty      {qty}\n"
+            msg += f"Score    {analysis['score']}/100\n"
+            msg += f"Conf     {analysis['confidence']}%\n"
+            msg += f"RSI      {analysis['rsi']}\n"
+            msg += f"Trend    {analysis['trend']}\n"
+            msg += f"Vol      {analysis['vol']}x\n"
+            msg += f"24h      {analysis['chg']:+.1f}%\n"
+            msg += f"```\n"
+            msg += f"**Reason:** {analysis['reason']}\n"
+            msg += f"Equity `${float(acct.equity):,.0f}` | `{self.trades_today}/{MAX_TRADES_PER_DAY}` trades"
+            
             await self.send_tg(msg)
             return True
-
+            
         except Exception as e:
-            logger.error(f"Trade execution error {symbol}: {e}")
-            await self.send_tg(f"❌ Trade failed {symbol}: {str(e)[:100]}")
+            log.error(f"Trade {sym}: {e}")
+            await self.send_tg(f"❌ `{sym}` {str(e)[:50]}")
             return False
 
     async def heartbeat(self):
         try:
-            acct = trading_client.get_account()
-            positions = trading_client.get_all_positions()
-
-            total_unrealized = sum(float(p.unrealized_pl) for p in positions)
-            win_rate = (self.wins_today / self.trades_today * 100) if self.trades_today > 0 else 0
-
-            if self.scan_times:
-                avg_scan = sum(self.scan_times[-10:]) / len(self.scan_times[-10:])
-                self.efficiency = max(50, 100 - (avg_scan / 10))
-
-            pos_text = ""
-            for p in positions[:5]:
-                pnl = float(p.unrealized_pl)
-                pnl_pct = float(p.unrealized_plpc) * 100
-                pos_text += f"• {p.symbol}: {p.qty} ({pnl_pct:+.1f}%)\n"
-
-            if len(positions) > 5:
-                pos_text += f"•...and {len(positions)-5} more\n"
-
-            if not pos_text:
-                pos_text = "No open positions\n"
-
-            msg = f"💓 **Heartbeat** {datetime.now().strftime('%H:%M:%S')}\n\n"
-            msg += f"**Account:**\n"
-            msg += f"• Equity: ${float(acct.equity):,.2f}\n"
-            msg += f"• Cash: ${float(acct.cash):,.2f}\n"
-            msg += f"• Unrealized: ${total_unrealized:+.2f}\n\n"
-            msg += f"**Today:**\n"
-            msg += f"• P&L: ${self.daily_pnl:+.2f}\n"
-            msg += f"• Trades: {self.trades_today} (W:{self.wins_today} L:{self.losses_today})\n"
-            msg += f"• Win Rate: {win_rate:.0f}%\n\n"
-            msg += f"**Positions ({len(positions)}):**\n{pos_text}\n"
-            msg += f"**System:**\n"
-            msg += f"• Regime: {self.market_regime}\n"
-            msg += f"• Efficiency: {self.efficiency:.1f}%\n"
-            msg += f"• API Calls: {self.api_calls}\n"
-            msg += f"• Mode: {'LIVE' if LIVE_MODE else 'PAPER'}"
-
+            acct = trading.get_account()
+            positions = trading.get_all_positions()
+            
+            eq = float(acct.equity)
+            cash = float(acct.cash)
+            unreal = sum(float(p.unrealized_pl) for p in positions)
+            pnl = eq - self.starting_equity
+            win_rate = (self.wins / self.trades_today * 100) if self.trades_today > 0 else 0
+            
+            # ROBINHOOD STYLE
+            msg = f"💓 **Portfolio Update** `{datetime.now().strftime('%H:%M')}`\n"
+            msg += f"```\n"
+            msg += f"Equity     ${eq:>9,.2f}\n"
+            msg += f"Today      ${pnl:>+9.2f}\n"
+            msg += f"Unreal     ${unreal:>+9.2f}\n"
+            msg += f"Cash       ${cash:>9,.2f}\n"
+            msg += f"```\n"
+            msg += f"**Today:** `{self.trades_today}` trades"
+            if self.trades_today > 0:
+                msg += f" • `{win_rate:.0f}%` win"
+            msg += f"\n**Positions:** `{len(positions)}/{MAX_POSITIONS}`\n"
+            msg += f"**Regime:** `{self.market_regime}` • **API:** `{self.api_calls}` calls"
+            
+            if positions:
+                msg += f"\n\n**Holdings:**\n"
+                for p in positions[:3]:
+                    pnl_pct = float(p.unrealized_plpc) * 100
+                    msg += f"`{p.symbol}` {pnl_pct:+.1f}%\n"
+            
             await self.send_tg(msg)
             self.last_heartbeat = datetime.now()
             self.api_calls = 0
-
+            
         except Exception as e:
-            logger.error(f"Heartbeat error: {e}")
+            log.error(f"HB: {e}")
 
-    async def daily_summary(self):
+    async def scan_market(self):
         try:
-            acct = trading_client.get_account()
-            ending_equity = float(acct.equity)
-            daily_pnl = ending_equity - self.starting_equity
-            win_rate = (self.wins_today / self.trades_today * 100) if self.trades_today > 0 else 0
-
-            conn = sqlite3.connect(DB_PATH)
-            conn.execute('''INSERT OR REPLACE INTO daily_stats
-                           VALUES (?,?,?,?,?,?,?)''',
-                        (datetime.now().date().isoformat(), self.starting_equity,
-                         ending_equity, daily_pnl, self.trades_today, win_rate, 0))
-            conn.commit()
-            conn.close()
-
-            msg = f"📊 **Daily Summary** {datetime.now().strftime('%Y-%m-%d')}\n\n"
-            msg += f"**Performance:**\n"
-            msg += f"• Starting: ${self.starting_equity:,.2f}\n"
-            msg += f"• Ending: ${ending_equity:,.2f}\n"
-            msg += f"• P&L: ${daily_pnl:+.2f} ({daily_pnl/self.starting_equity*100:+.2f}%)\n\n"
-            msg += f"**Trading:**\n"
-            msg += f"• Trades: {self.trades_today}\n"
-            msg += f"• Wins: {self.wins_today} | Losses: {self.losses_today}\n"
-            msg += f"• Win Rate: {win_rate:.1f}%\n\n"
-            msg += f"**System Health:**\n"
-            msg += f"• Efficiency: {self.efficiency:.1f}%\n"
-            msg += f"• Avg Scan: {sum(self.scan_times)/len(self.scan_times):.0f}ms" if self.scan_times else "N/A"
-
-            await self.send_tg(msg)
-
-        except Exception as e:
-            logger.error(f"Daily summary error: {e}")
-
-    async def scan(self):
-        try:
-            start_scan = time.time()
-
-            now_et = datetime.now(pytz.timezone('US/Eastern'))
-            is_weekday = now_et.weekday() < 5
-            market_open = is_weekday and 9 <= now_et.hour < 16
-            is_crypto_hours = True
-
-            if self.daily_loss <= -MAX_DAILY_LOSS:
-                if self.consecutive_losses >= 2:
-                    logger.warning(f"Daily loss limit hit: ${self.daily_loss}")
-                    await self.send_tg(f"🛑 **Risk Pause**\nDaily loss: ${self.daily_loss:.2f}\nPausing 30 minutes for analysis...")
-                    await asyncio.sleep(1800)
-                    self.daily_loss = 0
-                    self.consecutive_losses = 0
-                return
-
-            symbols = []
-            if is_crypto_hours:
-                symbols.extend(CRYPTO_UNIVERSE)
-            if market_open:
-                symbols.extend(STOCK_UNIVERSE[:20])
-
-            for i, symbol in enumerate(symbols):
-                if self.trades_today >= MAX_TRADES_PER_DAY:
-                    break
-
-                is_crypto = '/' in symbol
-                if not is_crypto and not market_open:
+            # 24/7 SCAN - crypto always, stocks when open
+            all_symbols = CRYPTOS + STOCKS
+            
+            for sym in all_symbols:
+                if self.trades_today >= MAX_TRADES_PER_DAY: break
+                
+                is_c = '/' in sym
+                if not is_c and not self.is_market_open(False):
                     continue
-
-                df = await self.get_data(symbol, is_crypto)
-                if df is None or len(df) < 50:
-                    continue
-
-                analysis = self.analyze(symbol, df)
-                if not analysis:
-                    continue
-
-                has_position = symbol in self.positions
-                position_size = self.positions.get(symbol, {}).get('qty', 0)
-
-                if not has_position and analysis['score'] >= 75 and analysis['confidence'] >= MIN_CONFIDENCE:
+                
+                df = await self.get_data(sym)
+                if df is None: continue
+                
+                analysis = self.analyze(sym, df)
+                if not analysis: continue
+                
+                has_pos = sym in self.positions
+                
+                # Buy signal
+                if not has_pos and analysis['score'] >= 75 and analysis['confidence'] >= MIN_CONFIDENCE:
                     if len(self.positions) < MAX_POSITIONS:
-                        success = await self.trade(symbol, 'buy', analysis)
-                        if success:
-                            self.positions[symbol] = {'qty': 1, 'entry': analysis['price']}
+                        await self.execute_trade(sym, 'buy', analysis)
                         await asyncio.sleep(2)
-
-                elif has_position and analysis['score'] <= 35:
-                    success = await self.trade(symbol, 'sell', analysis)
-                    if success and symbol in self.positions:
-                        del self.positions[symbol]
+                
+                # Sell signal
+                elif has_pos and analysis['score'] <= 35:
+                    await self.execute_trade(sym, 'sell', analysis)
                     await asyncio.sleep(2)
-
-                if i % 5 == 4:
-                    await asyncio.sleep(1)
-
+            
+            # Update positions
             try:
-                positions = trading_client.get_all_positions()
-                self.positions = {p.symbol: {'qty': float(p.qty), 'avg_price': float(p.avg_entry_price),
-                                           'unrealized_pl': float(p.unrealized_pl)} for p in positions}
-                self.daily_pnl = sum(float(p.unrealized_pl) for p in positions)
-            except:
-                pass
-
-            scan_duration = time.time() - start_scan
-            logger.info(f"Scan complete: {len(symbols)} symbols in {scan_duration:.1f}s")
-
+                pos = trading.get_all_positions()
+                self.positions = {p.symbol: float(p.avg_entry_price) for p in pos}
+                self.daily_pnl = sum(float(p.unrealized_pl) for p in pos)
+            except: pass
+            
         except Exception as e:
-            logger.error(f"Scan error: {e}", exc_info=True)
+            log.error(f"Scan: {e}", exc_info=True)
 
     async def run(self):
-        try:
-            acct = trading_client.get_account()
-            self.starting_equity = float(acct.equity)
-
-            await self.send_tg(
-                f"🚀 **Big Dog Bot v3.1 Online**\n\n"
-                f"**Config:**\n"
-                f"• Mode: {'🔴 LIVE' if LIVE_MODE else '🟢 PAPER'}\n"
-                f"• Universe: {len(CRYPTO_UNIVERSE)} crypto + {len(STOCK_UNIVERSE)} stocks\n"
-                f"• Max Position: ${MAX_POSITION_SIZE}\n"
-                f"• Daily Loss Limit: ${MAX_DAILY_LOSS}\n"
-                f"• Max Positions: {MAX_POSITIONS}\n\n"
-                f"**Starting Equity:** ${self.starting_equity:,.2f}\n\n"
-                f"All 200 upgrades active. Scanning every 60s."
-            )
-
-            logger.info("Bot started successfully")
-
-        except Exception as e:
-            logger.error(f"Startup failed: {e}")
-            await self.send_tg(f"❌ Startup failed: {str(e)}")
-            return
-
-        last_daily_summary = None
-
+        # Startup
+        acct = trading.get_account()
+        self.starting_equity = float(acct.equity)
+        
+        msg = f"🚀 **BigDog v4.0 ONLINE** `{'PAPER' if PAPER else 'LIVE'}`\n"
+        msg += f"```\n"
+        msg += f"Equity   ${self.starting_equity:,.2f}\n"
+        msg += f"Universe {len(CRYPTOS)}C + {len(STOCKS)}S\n"
+        msg += f"Max Pos  ${MAX_POS_SIZE}\n"
+        msg += f"Risk     {RISK_PER_TRADE*100:.1f}%/trade\n"
+        msg += f"Daily    ${MAX_DAILY_LOSS} stop\n"
+        msg += f"```\n"
+        msg += f"_24/7 scanning • 400 upgrades active_"
+        
+        await self.send_tg(msg)
+        log.info("Bot started")
+        
         while True:
             try:
-                current_hour = datetime.now().hour
-
-                now_et = datetime.now(pytz.timezone('US/Eastern'))
-                if now_et.hour == 16 and now_et.minute < 5 and last_daily_summary!= now_et.date():
-                    await self.daily_summary()
-                    last_daily_summary = now_et.date()
-                    self.trades_today = 0
-                    self.wins_today = 0
-                    self.losses_today = 0
-                    self.daily_loss = 0
-                    self.starting_equity = float(trading_client.get_account().equity)
-
-                await self.scan()
-
-                if (datetime.now() - self.last_heartbeat).total_seconds() > HEARTBEAT_MINUTES * 60:
+                await self.scan_market()
+                
+                # Heartbeat
+                if (datetime.now() - self.last_heartbeat).seconds > HEARTBEAT_MIN * 60:
                     await self.heartbeat()
-
-                await asyncio.sleep(60)
-
+                
+                await asyncio.sleep(45)  # 24/7 scanning
+                
             except Exception as e:
-                logger.error(f"Main loop error: {e}", exc_info=True)
+                log.error(f"Loop: {e}", exc_info=True)
                 await asyncio.sleep(60)
 
 if __name__ == "__main__":
@@ -631,6 +396,6 @@ if __name__ == "__main__":
         bot = BigDogBot()
         asyncio.run(bot.run())
     except KeyboardInterrupt:
-        logger.info("Bot stopped by user")
+        log.info("Stopped")
     except Exception as e:
-        logger.error(f"Fatal error: {e}", exc_info=True)
+        log.error(f"Fatal: {e}", exc_info=True)
