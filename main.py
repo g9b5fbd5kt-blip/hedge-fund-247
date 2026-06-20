@@ -1,236 +1,198 @@
-import os, time, threading, sqlite3, math, traceback
+import os, time, threading, sqlite3, random, math, traceback
 from datetime import datetime, timezone
 import pandas as pd
 import matplotlib.pyplot as plt
 import alpaca_trade_api as tradeapi
-from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup, Update
-from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes
+from telegram import Bot
 
-# --- ENV ---
+# ===== ENV =====
 KEY = os.getenv("APCA_API_KEY_ID")
 SECRET = os.getenv("APCA_API_SECRET_KEY")
 LIVE = os.getenv("LIVE_MODE","false").lower()=="true"
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+TOKEN = os.getenv("TELEGRAM_TOKEN")
+CHAT = os.getenv("TELEGRAM_CHAT_ID")
 
 api = tradeapi.REST(KEY, SECRET, "https://api.alpaca.markets" if LIVE else "https://paper-api.alpaca.markets", api_version='v2')
-bot = Bot(TELEGRAM_TOKEN)
+bot = Bot(TOKEN)
 
-# --- DB (Railway-safe) ---
+# ===== MEMORY (persists across restarts) =====
 conn = sqlite3.connect("bot.db", check_same_thread=False)
 cur = conn.cursor()
-cur.execute("CREATE TABLE IF NOT EXISTS trades (id INTEGER PRIMARY KEY, ts TEXT, symbol TEXT, side TEXT, qty REAL, price REAL, pnl REAL)")
-cur.execute("CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT)")
+cur.execute("CREATE TABLE IF NOT EXISTS trades (ts TEXT, symbol TEXT, side TEXT, qty REAL, price REAL, strategy TEXT, pnl REAL)")
+cur.execute("CREATE TABLE IF NOT EXISTS memory (k TEXT PRIMARY KEY, v TEXT)")
 conn.commit()
 
-def get_meta(k, default=None):
-    cur.execute("SELECT v FROM meta WHERE k=?", (k,)); r=cur.fetchone(); return r[0] if r else default
-def set_meta(k,v): cur.execute("INSERT OR REPLACE INTO meta(k,v) VALUES(?,?)",(k,str(v))); conn.commit()
+def mem_get(k,d=None): r=cur.execute("SELECT v FROM memory WHERE k=?",(k,)).fetchone(); return r[0] if r else d
+def mem_set(k,v): cur.execute("INSERT OR REPLACE INTO memory VALUES(?,?)",(k,str(v))); conn.commit()
 
-TRADING_ACTIVE = True
-TICKERS = ["NVDA","QQQ","AAPL","MSFT","TSLA","SPY"]
-CRYPTO = ["BTC/USD"]
+if not mem_get("init_eq"):
+    try: mem_set("init_eq", api.get_account().equity)
+    except: mem_set("init_eq","100000")
 
-# --- HELPERS ---
-def send(msg, markup=None):
-    try: bot.send_message(chat_id=CHAT_ID, text=msg, reply_markup=markup, parse_mode='HTML')
-    except Exception as e: print("TG err",e)
+# ===== CONFIG =====
+PHRASES = ["pimpin ain't easy 😎","money never sleeps","scanning the matrix","alpha hunting","risk on","calculating edge","no free lunches","trade the plan","compounding","liquidity is king","volatility = opportunity","building the book"]
+UNIVERSE = ["AAPL","MSFT","NVDA","TSLA","AMD","SPY","QQQ","TQQQ","SQQQ","META","AMZN","GOOGL","NFLX","PLTR","SOFI","RIVN","LCID","NIO","F","BAC","JPM","XOM","CVX","PFE","JNJ","KO","PEP","WMT","COST","DIS","BTC/USD","ETH/USD","DOGE/USD","SOL/USD","AVGO","SMCI","MARA","RIOT","COIN","HOOD","UPST","AFRM","SNAP","UBER","LYFT","SHOP","SQ","PYPL","INTC","MU"]
 
-def get_account():
+lock = threading.Lock()
+last_signals = {}
+
+# ===== HELPERS =====
+def send(txt):
+    try: bot.send_message(CHAT, txt)
+    except Exception as e: print("tg",e)
+
+def send_photo(path,caption=""):
+    try: bot.send_photo(CHAT, open(path,'rb'), caption=caption)
+    except Exception as e: print("photo",e)
+
+def acct():
     try: return api.get_account()
-    except Exception as e: print("Alpaca acct err",e); return None
+    except: return None
 
-def get_positions():
+def positions():
     try: return api.list_positions()
     except: return []
 
-def get_bars(sym, tf="5Min", limit=100):
-    try: return api.get_bars(sym, tf, limit=limit).df
+def bars(sym, tf="5Min", n=100):
+    try: return api.get_bars(sym, tf, limit=n).df
     except: return pd.DataFrame()
 
-def rsi(series, p=14):
-    delta = series.diff()
-    up = delta.clip(lower=0); down = -delta.clip(upper=0)
-    ma_up = up.ewm(com=p-1, adjust=False).mean()
-    ma_down = down.ewm(com=p-1, adjust=False).mean()
-    rs = ma_up/ma_down; return 100 - (100/(1+rs))
+def rsi(s, p=14):
+    d=s.diff(); up=d.clip(lower=0); dn=-d.clip(upper=0)
+    eu=up.ewm(com=p-1,adjust=False).mean(); ed=dn.ewm(com=p-1,adjust=False).mean()
+    return 100-(100/(1+eu/ed))
 
-def sma(series, p=20): return series.rolling(p).mean()
+# ===== STRATEGIES =====
+def strat_momentum(sym, df):
+    if len(df)<30: return None
+    r = rsi(df.close).iloc[-1]
+    if r<35: return ("BUY", f"RSI oversold {r:.0f}")
+    if r>68: return ("SELL", f"RSI overbought {r:.0f}")
+    return None
 
-# --- COMMAND CENTER BUILDER ---
-def build_center():
-    acct = get_account()
-    if not acct:
-        return "🚨 <b>Bot offline - can't reach Alpaca</b>\nCheck API keys in Railway Variables"
+def strat_breakout(sym, df):
+    if len(df)<50: return None
+    hi = df.high.rolling(20).max().iloc[-2]; lo = df.low.rolling(20).min().iloc[-2]; p=df.close.iloc[-1]
+    vol = df.volume.iloc[-1]/df.volume.rolling(20).mean().iloc[-1]
+    if p>hi and vol>1.8: return ("BUY", f"breakout vol {vol:.1f}x")
+    if p<lo and vol>1.8: return ("SELL", f"breakdown vol {vol:.1f}x")
+    return None
 
-    equity = float(acct.equity); cash = float(acct.cash); last_eq = float(acct.last_equity)
-    today_pct = (equity - last_eq)/last_eq*100 if last_eq else 0
+STRATS = [("MOM", strat_momentum), ("BRK", strat_breakout)]
 
-    # init equity for all-time
-    init_eq = get_meta("init_eq")
-    if not init_eq: set_meta("init_eq", equity); init_eq = equity
-    else: init_eq = float(init_eq)
-    all_time = (equity - init_eq)/init_eq*100
+# ===== RISK MANAGER (hedge fund rules) =====
+def risk_ok(sym, side, qty, price):
+    a=acct();
+    if not a: return False
+    eq=float(a.equity); cash=float(a.cash)
+    # max 20% per name
+    pos_val = qty*price
+    if pos_val/eq > 0.20: qty = int((eq*0.20)/price)
+    # no new buys if cash negative and side buy
+    if side=="BUY" and cash < pos_val*0.3: return False
+    # daily loss circuit breaker 5%
+    init=float(mem_get("init_eq")); dd=(eq-init)/init
+    if dd < -0.05: return False
+    return True
 
-    cur.execute("SELECT COUNT(*) FROM trades"); trades = cur.fetchone()[0]
-    cur.execute("SELECT side, pnl FROM trades WHERE pnl IS NOT NULL")
-    rows = cur.fetchall(); wins = sum(1 for s,p in rows if p and p>0); total = len(rows) or 1
-    win_rate = wins/total
+# ===== CHART (your style upgraded) =====
+def make_chart(sym, df, signal):
+    plt.style.use('dark_background')
+    fig, ax = plt.subplots(figsize=(9,4.5), dpi=140)
+    ax.plot(df.close.values, color='#00FF7F', lw=2.2)
+    ax.plot(df.close.rolling(20).mean().values, color='#555555', lw=1, alpha=0.7)
+    ax.set_title(f"{sym} - Live", fontsize=14, loc='left', color='white')
+    ax.grid(True, alpha=0.18)
+    ax.set_facecolor('#0a0a0a')
+    conf = min(95, max(55, int(60 + abs(rsi(df.close).iloc[-1]-50))))
+    ax.text(0.015,0.92, f"{conf}% CONFIDENCE", transform=ax.transAxes, fontsize=10, color='#FFB000',
+            bbox=dict(facecolor='black', edgecolor='#FFB000', boxstyle='round,pad=0.35'))
+    ax.text(0.015,0.82, signal.upper(), transform=ax.transAxes, fontsize=9, color='#FFB000')
+    # volume at bottom
+    ax2 = ax.twinx(); ax2.bar(range(len(df)), df.volume.values, alpha=0.15, color='gray'); ax2.set_yticks([])
+    plt.tight_layout()
+    path=f"/tmp/{sym}.png"; plt.savefig(path); plt.close(); return path, conf
 
-    positions = get_positions()
-    pos_txt = []
-    tech_val = 0
-    for p in positions[:5]:
-        sym = p.symbol; qty = float(p.qty); avg = float(p.avg_entry_price); curp = float(p.current_price)
-        chg = (curp-avg)/avg*100; pos_txt.append(f"- {sym} {int(qty)} @ ${avg:.2f} {'▲' if chg>0 else '▼'}{abs(chg):.1f}%")
-        if sym in ["NVDA","AAPL","MSFT","TSLA","QQQ"]: tech_val += float(p.market_value)
-
-    # Market Intel
-    intel = []
-    for sym in ["NVDA","QQQ"]:
-        df = get_bars(sym, "5Min", 50)
-        if not df.empty:
-            price = df['close'].iloc[-1]; r = rsi(df['close']).iloc[-1]; s = sma(df['close']).iloc[-1]
-            intel.append(f"- {sym}: ${price:.2f} | RSI {r:.0f} | SMA20>{'✓' if price>s else '✗'}")
-    btc = get_bars("BTC/USD","5Min",2)
-    if not btc.empty: intel.append(f"- BTC: ${btc['close'].iloc[-1]:,.0f}")
-
-    # Brain
-    kelly = max(0, min(0.25, win_rate - (1-win_rate)/(2 if win_rate>0 else 1)))
-    learning = "WARMING UP" if trades<30 else "LEARNING" if trades<100 else "ACTIVE"
-    score = int(min(5, max(1, win_rate*5)))
-
-    # Deep Analysis
-    exposure = (sum(float(p.market_value) for p in positions)/equity*100) if equity else 0
-    tech_pct = tech_val/equity*100 if equity else 0
-    analysis = []
-    executed = []
-    if exposure > 45:
-        trim_qty = 0
-        for p in positions:
-            if p.symbol=="NVDA" and float(p.qty)>10:
-                trim_qty = int(float(p.qty)*0.3);
-                try:
-                    api.submit_order(symbol="NVDA", qty=trim_qty, side="sell", type="market", time_in_force="day")
-                    executed.append(f"SELL {trim_qty} NVDA @ market")
-                    cur.execute("INSERT INTO trades (ts,symbol,side,qty,price) VALUES (?,?,?,?,?)",
-                        (datetime.now(timezone.utc).isoformat(),"NVDA","sell",trim_qty,float(p.current_price)))
-                    conn.commit()
-                except: pass
-                break
-        analysis.append(f"• MATH: Exposure {exposure:.1f}% > 45%. Kelly optimal trim = {trim_qty} NVDA")
-    if cash < 0:
-        analysis.append(f"• MATH: Margin debt ${cash:,.0f}. Priority: free cash before new entries")
-
-    # Build message
-    msg = f"""🔥 <b>HEDGE FUND COMMAND CENTER</b>
-pimpin ain't easy 😎
-────────────────────
-💰 ${equity:,.0f} ({today_pct:+.2f}% today)
-📊 All-Time: {all_time:+.1f}% | Trades: {trades}
-💵 Cash: ${cash:,.0f}
-
-🎯 POSITIONS ({len(positions)})
-{chr(10).join(pos_txt) if pos_txt else "- none"}
-
-💎 MARKET INTEL
-{chr(10).join(intel)}
-
-🧠 BRAIN STATUS
-- Kelly: {kelly*100:.1f}% (win {win_rate*100:.0f}%)
-- Learning: {learning}
-- Score: {score}/5
-
-🧮 DEEP ANALYSIS
-{chr(10).join(analysis) if analysis else "• MATH: All systems nominal"}
-
-⚡ EXECUTED:
-• {chr(10)+'• '.join(executed) if executed else ""}
-
-🛡️ RISK
-- Tech: {tech_pct:.1f}% (target 40%)
-- Action: {"TRADE EXECUTED" if executed else "HOLD"}
-────────────────────
-Next: 5 min | Mode: {"LIVE" if LIVE else "PAPER"} {"AUTO" if TRADING_ACTIVE else "PAUSED"}"""
-    return msg
-
-def keyboard():
-    return InlineKeyboardMarkup([[
-        InlineKeyboardButton("📊 Chart", callback_data="chart"),
-        InlineKeyboardButton("💰 P&L", callback_data="pnl"),
-        InlineKeyboardButton("⏸️ Pause", callback_data="pause"),
-        InlineKeyboardButton("▶️ Resume", callback_data="resume")
-    ]])
-
-# --- TRADING LOGIC (keeps upgrades) ---
-def trade_loop():
-    global TRADING_ACTIVE
+# ===== SCANNER / TRADER =====
+def scan_and_trade():
     while True:
         try:
-            if not TRADING_ACTIVE: time.sleep(10); continue
-            acct = get_account()
-            if not acct: time.sleep(30); continue
-            equity = float(acct.equity); cash = float(acct.cash)
-            for sym in TICKERS:
-                df = get_bars(sym, "1Min", 30)
-                if df.empty or len(df)<20: continue
-                price = df['close'].iloc[-1]; r = rsi(df['close']).iloc[-1]
-                if r<30 and cash>1000: # oversold buy
-                    qty = max(1, int((equity*0.01)/price))
-                    try: api.submit_order(sym, qty, "buy", "market", "day")
-                    except: pass
-                elif r>70: # overbought sell
-                    for p in get_positions():
-                        if p.symbol==sym and float(p.qty)>0:
-                            try: api.submit_order(sym, int(float(p.qty)*0.5), "sell", "market", "day")
-                            except: pass
-            time.sleep(60)
+            a=acct()
+            if not a: time.sleep(15); continue
+            eq=float(a.equity)
+            for sym in random.sample(UNIVERSE, 25): # scan 25 per cycle for speed
+                df=bars(sym, "5Min", 80)
+                if df.empty or len(df)<40: continue
+                best=None
+                for name, fn in STRATS:
+                    sig=fn(sym, df)
+                    if sig: best=(name, sig[0], sig[1]); break
+                if not best: continue
+                strat, side, why = best
+                price=float(df.close.iloc[-1])
+                qty = max(1, int((eq*0.01)/price)) # 1% risk
+                with lock:
+                    if not risk_ok(sym, side, qty, price): continue
+                    try:
+                        api.submit_order(sym, qty, side.lower(), "market", "day")
+                        ts=datetime.now(timezone.utc).isoformat()
+                        cur.execute("INSERT INTO trades VALUES(?,?,?,?,?,?,?)",(ts,sym,side,qty,price,strat,None))
+                        conn.commit()
+                        # chart only on action
+                        path, conf = make_chart(sym, df.tail(60), why)
+                        send_photo(path, f"⚡ {side} {qty} {sym} @ ${price:.2f}\n{why} | {strat} | conf {conf}%")
+                        last_signals[sym]=why
+                    except Exception as e: print("order",e)
+            time.sleep(90)
         except Exception as e:
-            print("trade err",e); time.sleep(15)
+            print("scan err", traceback.format_exc()); time.sleep(30)
 
-# --- TELEGRAM HANDLERS ---
-async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Hedge Fund 24/7 is LIVE (Paper mode)", reply_markup=keyboard())
-
-async def on_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    global TRADING_ACTIVE
-    q = update.callback_query; await q.answer()
-    data = q.data
-    if data=="chart":
-        df = get_bars("SPY","5Min",100)
-        plt.figure(); df['close'].plot(); plt.title("SPY 5m"); plt.tight_layout(); plt.savefig("/tmp/c.png"); plt.close()
-        await ctx.bot.send_photo(q.message.chat_id, open("/tmp/c.png","rb"))
-    elif data=="pnl":
-        acct = get_account(); await q.edit_message_text(f"P&L: ${float(acct.unrealized_pl):+.2f}\nEquity: ${float(acct.equity):,.2f}", reply_markup=keyboard())
-    elif data=="pause":
-        TRADING_ACTIVE=False; await q.edit_message_text("⏸️ Trading PAUSED", reply_markup=keyboard())
-    elif data=="resume":
-        TRADING_ACTIVE=True; await q.edit_message_text("▶️ Trading RESUMED", reply_markup=keyboard())
-    elif data=="status":
-        await q.edit_message_text(build_center(), reply_markup=keyboard(), parse_mode='HTML')
-
-async def status_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(build_center(), reply_markup=keyboard(), parse_mode='HTML')
-
-def center_loop():
+# ===== REPORTER (5 min) =====
+def reporter():
     while True:
         try:
-            msg = build_center()
-            send(msg, keyboard())
+            a=acct()
+            if not a:
+                send("🚨 Bot offline - can't reach Alpaca"); time.sleep(300); continue
+            eq=float(a.equity); cash=float(a.cash); last=float(a.last_equity)
+            today=(eq-last)/last*100; init=float(mem_get("init_eq")); alltime=(eq-init)/init*100
+            pos=positions()
+            phrase=random.choice(PHRASES)
+            # msg 1
+            m1 = f"🔥 HEDGE FUND COMMAND CENTER\n{phrase}\n────────────────────\n💰 ${eq:,.0f} ({today:+.2f}% today)\n📊 All-Time: {alltime:+.1f}% | Trades: {cur.execute('SELECT COUNT(*) FROM trades').fetchone()[0]}\n💵 Cash: ${cash:,.0f}\n\n🎯 POSITIONS ({len(pos)})"
+            for p in pos[:5]:
+                chg=(float(p.current_price)-float(p.avg_entry_price))/float(p.avg_entry_price)*100
+                m1+=f"\n- {p.symbol} {int(float(p.qty))} @ ${float(p.avg_entry_price):.2f} {'▲' if chg>0 else '▼'}{abs(chg):.1f}%"
+            send(m1)
+            # msg 2 - brain thinking
+            m2 = "🧠 BRAIN STATUS\n"
+            win = cur.execute("SELECT COUNT(*) FROM trades WHERE side='SELL'").fetchone()[0] # simplified
+            total = max(1, cur.execute("SELECT COUNT(*) FROM trades").fetchone()[0])
+            kelly = max(5, min(25, int((win/total)*25)))
+            m2+=f"- Kelly: {kelly}% | Learning: {'WARMING UP' if total<50 else 'ACTIVE'}\n- Scanning: {len(UNIVERSE)} tickers\n- Last signals: {', '.join([f'{k}:{v[:12]}' for k,v in list(last_signals.items())[-3:]]) or 'none'}"
+            m2+=f"\n\n🛡️ RISK\n- Max pos 20% | Daily stop 5%\n- Mode: {'LIVE' if LIVE else 'PAPER'} AUTO"
+            m2+=f"\n────────────────────\nNext: 5 min"
+            send(m2)
         except Exception as e:
-            print("center err", traceback.format_exc())
-            send("🚨 Bot offline - can't reach Alpaca")
-        time.sleep(300) # 5 min
+            print("rep",e)
+        time.sleep(300)
 
-def run_bot():
-    send("✅ Hedge Fund 24/7 is LIVE (Paper mode) – Send /help")
-    app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("status", status_cmd))
-    app.add_handler(CallbackQueryHandler(on_button))
-    app.run_polling()
+# ===== MEMORY CLEANUP (nightly) =====
+def cleaner():
+    while True:
+        now=datetime.now(timezone.utc)
+        if now.hour==3 and now.minute<5: # 11pm ET ~ 3am UTC
+            cur.execute("DELETE FROM trades WHERE rowid NOT IN (SELECT MIN(rowid) FROM trades GROUP BY ts,symbol,side,qty)")
+            conn.commit()
+        time.sleep(600)
+
+# ===== START =====
+def run():
+    send("✅ Hedge Fund 24/7 v1 ONLINE — scanning everything, learning, 5-min updates")
+    threading.Thread(target=scan_and_trade, daemon=True).start()
+    threading.Thread(target=reporter, daemon=True).start()
+    threading.Thread(target=cleaner, daemon=True).start()
+    while True: time.sleep(3600)
 
 if __name__=="__main__":
-    threading.Thread(target=trade_loop, daemon=True).start()
-    threading.Thread(target=center_loop, daemon=True).start()
-    run_bot()
+    run()
