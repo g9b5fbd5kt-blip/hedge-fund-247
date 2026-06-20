@@ -1,16 +1,10 @@
 """
-v2.0 Money Printer Pro - with HOLD notifications
-Fixed TELEGRAM_TOKEN variable name
+BOSS v2.1 — Money Printer Pro
+Sleek design • 20 rotating phrases • HOLD-only-when-holding
 """
 
-import os
-import time
-import sqlite3
-import requests
+import os, time, sqlite3, requests, pytz, random, logging
 from datetime import datetime, timedelta
-import pytz
-import random
-import logging
 from alpaca.trading.client import TradingClient
 from alpaca.trading.requests import MarketOrderRequest
 from alpaca.trading.enums import OrderSide, TimeInForce
@@ -18,344 +12,209 @@ from alpaca.data.historical import StockHistoricalDataClient, CryptoHistoricalDa
 from alpaca.data.requests import StockBarsRequest, CryptoBarsRequest
 from alpaca.data.timeframe import TimeFrame
 
+# ═══════════════════════════════════════════════════════════
+# CONFIG
+# ═══════════════════════════════════════════════════════════
 ALPACA_KEY = os.getenv("APCA_API_KEY_ID")
 ALPACA_SECRET = os.getenv("APCA_API_SECRET_KEY")
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN") # FIXED: matches your Railway
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_CHAT = os.getenv("TELEGRAM_CHAT_ID")
 
 PAPER = True
 MAX_POSITION = 300.0
 PROFIT_RESERVE_PCT = 0.30
 
+# 20 rotating phrases — your style
 PHRASES = [
-    "pimpin ain't easy",
-    "stay grounded",
-    "bag secured",
-    "printer go brrr",
-    "we eat",
-    "no cap",
-    "locked in",
-    "touch grass later",
-    "money printer activated",
-    "built different",
-    "on god"
+    "pimpin ain't easy", "stay grounded", "bag secured", "printer go brrr",
+    "we eat", "no cap", "locked in", "touch grass later",
+    "money printer activated", "built different", "on god", "diamond hands",
+    "wagmi", "secure the bag", "we up", "different breed",
+    "cookin", "running it up", "stay dangerous", "let's work"
 ]
 
 STOCKS = ["AAPL", "MSFT", "NVDA", "TSLA", "AMD", "QQQ", "SPY", "TSM", "GOOGL", "AMZN"]
 CRYPTO = ["BTC/USD", "ETH/USD", "SOL/USD", "AVAX/USD", "DOGE/USD"]
 
-last_api_call = 0
-API_DELAY = 0.35
-last_hold_ping = 0
-HOLD_PING_INTERVAL = 300 # Ping HOLD status every 5 minutes max
-
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("Boss")
-
-if not ALPACA_KEY or not ALPACA_SECRET:
-    raise ValueError("APCA_API_KEY_ID and APCA_API_SECRET_KEY required")
+# ═══════════════════════════════════════════════════════════
+# SETUP
+# ═══════════════════════════════════════════════════════════
+logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
+logger = logging.getLogger("BOSS")
 
 trading_client = TradingClient(ALPACA_KEY, ALPACA_SECRET, paper=PAPER)
 stock_client = StockHistoricalDataClient(ALPACA_KEY, ALPACA_SECRET)
 crypto_client = CryptoHistoricalDataClient(ALPACA_KEY, ALPACA_SECRET)
 
-conn = sqlite3.connect("boss_v2.db", check_same_thread=False)
+conn = sqlite3.connect("boss.db", check_same_thread=False)
 c = conn.cursor()
-
-c.execute("""CREATE TABLE IF NOT EXISTS trades (
-    id INTEGER PRIMARY KEY, timestamp TEXT, symbol TEXT, side TEXT,
-    qty REAL, price REAL, pnl REAL, strategy TEXT, phrase TEXT
-)""")
-c.execute("""CREATE TABLE IF NOT EXISTS learning (
-    id INTEGER PRIMARY KEY, timestamp TEXT, rsi_threshold REAL,
-    win_rate REAL, profit_factor REAL
-)""")
-c.execute("""CREATE TABLE IF NOT EXISTS reserve (
-    id INTEGER PRIMARY KEY, timestamp TEXT, amount REAL, total REAL
-)""")
+c.execute("""CREATE TABLE IF NOT EXISTS trades (id INTEGER PRIMARY KEY, ts TEXT, sym TEXT, side TEXT, qty REAL, price REAL, pnl REAL, strat TEXT)""")
+c.execute("""CREATE TABLE IF NOT EXISTS reserve (id INTEGER PRIMARY KEY, ts TEXT, amt REAL)""")
 conn.commit()
 
+last_api = 0
+last_hold_ping = 0
+
 def rate_limit():
-    global last_api_call
-    elapsed = time.time() - last_api_call
-    if elapsed < API_DELAY:
-        time.sleep(API_DELAY - elapsed)
-    last_api_call = time.time()
+    global last_api
+    elapsed = time.time() - last_api
+    if elapsed < 0.35: time.sleep(0.35 - elapsed)
+    last_api = time.time()
 
-def send_telegram(text, chart_url=None):
+def send_tg(text, chart=None):
     try:
-        phrase = random.choice(PHRASES)
-        msg = text + "\n\n<i>" + phrase + "</i>"
-        if chart_url:
-            msg += "\n\n<a href='" + chart_url + "'>📊 View Chart</a>"
-        url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-        data = {"chat_id": TELEGRAM_CHAT, "text": msg, "parse_mode": "HTML", "disable_web_page_preview": False}
-        requests.post(url, data=data, timeout=10)
-        logger.info(f"Telegram sent: {text[:50]}...")
+        msg = f"{text}\n\n<i>{random.choice(PHRASES)}</i>"
+        if chart: msg += f"\n\n<a href='{chart}'>📊 View Chart</a>"
+        requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
+                     data={"chat_id": TELEGRAM_CHAT, "text": msg, "parse_mode": "HTML"}, timeout=10)
         time.sleep(0.2)
-    except Exception as e:
-        logger.error(f"Telegram error: {e}")
+    except Exception as e: logger.error(f"TG: {e}")
 
-def tradingview_chart(symbol):
-    clean = symbol.replace("/USD", "USD").replace("/", "")
-    if "USD" in symbol:
-        return f"https://www.tradingview.com/chart/?symbol=COINBASE:{clean}"
-    else:
-        return f"https://www.tradingview.com/chart/?symbol=NASDAQ:{symbol}"
+def chart_url(sym):
+    clean = sym.replace("/USD", "USD").replace("/", "")
+    return f"https://tradingview.com/chart/?symbol=COINBASE:{clean}" if "/" in sym else f"https://tradingview.com/chart/?symbol=NASDAQ:{sym}"
 
 def get_account():
     rate_limit()
-    try:
-        return trading_client.get_account()
-    except Exception as e:
-        logger.error(f"Account error: {e}")
-        return None
+    try: return trading_client.get_account()
+    except: return None
 
 def get_positions():
     rate_limit()
-    try:
-        return trading_client.get_all_positions()
-    except:
-        return []
+    try: return trading_client.get_all_positions()
+    except: return []
 
+# ═══════════════════════════════════════════════════════════
+# ANALYST
+# ═══════════════════════════════════════════════════════════
 class Analyst:
-    def __init__(self):
-        self.rsi_threshold = 65
+    def __init__(self): self.rsi_thresh = 65
 
-    def analyze(self, symbol):
+    def analyze(self, sym):
         try:
             rate_limit()
-            is_crypto = "/" in symbol
-            if is_crypto:
-                req = CryptoBarsRequest(symbol_or_symbols=symbol, timeframe=TimeFrame.Minute, start=datetime.now() - timedelta(hours=2))
-                bars = crypto_client.get_crypto_bars(req).df
-            else:
-                req = StockBarsRequest(symbol_or_symbols=symbol, timeframe=TimeFrame.Minute, start=datetime.now() - timedelta(hours=2))
-                bars = stock_client.get_stock_bars(req).df
+            is_crypto = "/" in sym
+            req = (CryptoBarsRequest(symbol_or_symbols=sym, timeframe=TimeFrame.Minute, start=datetime.now()-timedelta(hours=2))
+                   if is_crypto else StockBarsRequest(symbol_or_symbols=sym, timeframe=TimeFrame.Minute, start=datetime.now()-timedelta(hours=2)))
+            bars = (crypto_client.get_crypto_bars(req) if is_crypto else stock_client.get_stock_bars(req)).df
 
-            if bars.empty or len(bars) < 20:
-                return {"score": 0, "action": "WAIT"}
+            if bars.empty or len(bars) < 20: return {"score":0, "action":"WAIT"}
 
             closes = bars['close'].values[-14:]
-            deltas = [closes[i+1] - closes[i] for i in range(len(closes)-1)]
-            gains = [d if d > 0 else 0 for d in deltas]
-            losses = [-d if d < 0 else 0 for d in deltas]
-            avg_gain = sum(gains) / 14
-            avg_loss = sum(losses) / 14 if sum(losses) > 0 else 0.01
-            rs = avg_gain / avg_loss
-            rsi = 100 - (100 / (1 + rs))
+            deltas = [closes[i+1]-closes[i] for i in range(13)]
+            gains = [d if d>0 else 0 for d in deltas]
+            losses = [-d if d<0 else 0 for d in deltas]
+            rs = (sum(gains)/14) / (sum(losses)/14 if sum(losses)>0 else 0.01)
+            rsi = 100 - (100/(1+rs))
 
-            score = 50
-            if rsi < 30: score = 85
-            elif rsi > self.rsi_threshold: score = 15
-            elif 45 < rsi < 55: score = 60
+            score = 85 if rsi<30 else 15 if rsi>self.rsi_thresh else 60 if 45<rsi<55 else 50
+            action = "BUY" if score>70 else "SELL" if score<30 else "HOLD"
 
-            action = "BUY" if score > 70 else "SELL" if score < 30 else "HOLD"
-            return {"score": score, "rsi": round(rsi, 1), "action": action, "price": float(bars['close'].iloc[-1])}
-        except Exception as e:
-            logger.error(f"Analyst error {symbol}: {e}")
-            return {"score": 0, "action": "WAIT"}
+            return {"score":score, "rsi":round(rsi,1), "action":action, "price":float(bars['close'].iloc[-1])}
+        except: return {"score":0, "action":"WAIT"}
 
-class RiskManager:
-    def check(self, symbol, account, positions):
+# ═══════════════════════════════════════════════════════════
+# RISK
+# ═══════════════════════════════════════════════════════════
+class Risk:
+    def check(self, sym, acct, positions):
         try:
-            buying_power = float(account.buying_power)
-            if buying_power < 50:
-                return False, "Low buying power"
-            for pos in positions:
-                if pos.symbol == symbol:
-                    unrealized = float(pos.unrealized_pl)
-                    if unrealized < -20:
-                        return False, "Position losing"
-            if "SOL" in symbol:
-                for pos in positions:
-                    if "AVAX" in pos.symbol:
-                        return False, "Correlation guard"
+            if float(acct.buying_power) < 50: return False, "Low buying power"
+            for p in positions:
+                if p.symbol == sym and float(p.unrealized_pl) < -20: return False, "Position losing"
+                if "SOL" in sym and "AVAX" in p.symbol: return False, "Correlation guard"
             return True, "Approved"
-        except Exception as e:
-            return False, f"Risk error: {e}"
+        except Exception as e: return False, str(e)
 
+# ═══════════════════════════════════════════════════════════
+# BOSS
+# ═══════════════════════════════════════════════════════════
 class Boss:
     def __init__(self):
         self.analyst = Analyst()
-        self.risk = RiskManager()
-        self.last_learning = datetime.now()
+        self.risk = Risk()
 
     def scan(self):
         global last_hold_ping
-        account = get_account()
-        if not account:
-            return
+        acct = get_account()
+        if not acct: return
+
         positions = get_positions()
-        now_et = datetime.now(pytz.timezone('US/Eastern'))
-        market_open = now_et.weekday() < 5 and 9 <= now_et.hour < 16
+        now = datetime.now(pytz.timezone('US/Eastern'))
+        market_open = now.weekday()<5 and 9 <= now.hour < 16
+
         opportunities = []
-        all_analyses = []
-
-        for symbol in CRYPTO:
-            analysis = self.analyst.analyze(symbol)
-            all_analyses.append({"symbol": symbol, **analysis})
-            if analysis["score"] > 70:
-                opportunities.append({"symbol": symbol, "score": analysis["score"], "price": analysis["price"], "type": "crypto", "action": analysis["action"]})
-
-        if market_open:
-            for symbol in STOCKS:
-                analysis = self.analyst.analyze(symbol)
-                all_analyses.append({"symbol": symbol, **analysis})
-                if analysis["score"] > 70:
-                    opportunities.append({"symbol": symbol, "score": analysis["score"], "price": analysis["price"], "type": "stock", "action": analysis["action"]})
+        for sym in CRYPTO + (STOCKS if market_open else []):
+            a = self.analyst.analyze(sym)
+            if a["score"] > 70: opportunities.append({"sym":sym, "score":a["score"], "price":a["price"]})
 
         opportunities.sort(key=lambda x: x["score"], reverse=True)
-        all_analyses.sort(key=lambda x: x["score"], reverse=True)
-
         traded = False
+
         if opportunities:
             top = opportunities[0]
-            approved, reason = self.risk.check(top["symbol"], account, positions)
+            approved, reason = self.risk.check(top["sym"], acct, positions)
             if approved:
-                self.execute_trade(top, account)
+                self.execute(top, acct)
                 traded = True
             else:
-                # Ping when high score but blocked
-                msg = f"🚫 <b>HOLD - Risk Blocked</b>\n\n• {top['symbol']} Score: {top['score']}/100\n• Reason: {reason}\n• Price: ${top['price']:.2f}"
-                send_telegram(msg, tradingview_chart(top['symbol']))
+                send_tg(f"🚫 <b>HOLD</b>\n\n{top['sym']} • Score {top['score']}/100\nBlocked: {reason}", chart_url(top["sym"]))
 
         self.check_exits(positions)
 
-        # Ping HOLD status every 5 minutes if no trade
-        if not traded and time.time() - last_hold_ping > HOLD_PING_INTERVAL:
-            if all_analyses:
-                top = all_analyses[0]
-                msg = f"👀 <b>SCANNING - HOLDING</b>\n\n• Watching: {top['symbol']}\n• Score: {top['score']}/100 (need 70+)\n• RSI: {top.get('rsi', 0)}\n• Action: {top['action']}\n• Positions: {len(positions)}/3"
-                send_telegram(msg)
-                last_hold_ping = time.time()
+        # HOLD ping ONLY when you own something
+        if not traded and len(positions) > 0 and time.time() - last_hold_ping > 300:
+            p = positions[0]
+            pnl = float(p.unrealized_pl)
+            pnl_pct = float(p.unrealized_plpc) * 100
+            send_tg(f"💎 <b>HOLDING</b>\n\n{p.symbol}\n${pnl:+.2f} ({pnl_pct:+.1f}%)\nQty: {p.qty}", chart_url(p.symbol))
+            last_hold_ping = time.time()
 
-        if (datetime.now() - self.last_learning).seconds > 3600:
-            self.learn()
-            self.last_learning = datetime.now()
-
-    def execute_trade(self, opp, account):
+    def execute(self, opp, acct):
         try:
-            symbol = opp["symbol"]
-            price = opp["price"]
-            buying_power = float(account.buying_power)
-            size = min(MAX_POSITION, buying_power * 0.95)
+            sym, price = opp["sym"], opp["price"]
+            size = min(MAX_POSITION, float(acct.buying_power) * 0.95)
             qty = size / price
-            if "/" in symbol:
-                qty = round(qty, 6)
-            else:
-                qty = int(qty)
-                if qty < 1:
-                    return
+            qty = round(qty, 6) if "/" in sym else int(qty)
+            if qty < 1 and "/" not in sym: return
 
             rate_limit()
-            tif = TimeInForce.GTC if "/" in symbol else TimeInForce.DAY
-            order = MarketOrderRequest(symbol=symbol, qty=qty, side=OrderSide.BUY, time_in_force=tif)
-            trading_client.submit_order(order)
+            tif = TimeInForce.GTC if "/" in sym else TimeInForce.DAY
+            trading_client.submit_order(MarketOrderRequest(symbol=sym, qty=qty, side=OrderSide.BUY, time_in_force=tif))
 
-            phrase = random.choice(PHRASES)
-            c.execute("INSERT INTO trades VALUES (NULL,?,?,?,?,?,?,?,?)", (datetime.now().isoformat(), symbol, "BUY", qty, price, 0, "momentum", phrase))
+            c.execute("INSERT INTO trades VALUES (NULL,?,?,?,?,?,?,?)",
+                     (datetime.now().isoformat(), sym, "BUY", qty, price, 0, "momentum"))
             conn.commit()
 
-            chart = tradingview_chart(symbol)
-            msg = f"🤖 <b>BOSS EXECUTED BUY</b>\n\n• {symbol} x{qty}\n• ${price:.2f} (${size:.0f})\n• Score: {opp['score']}/100"
-            send_telegram(msg, chart)
-        except Exception as e:
-            logger.error(f"Execute error: {e}")
+            send_tg(f"🤖 <b>BUY EXECUTED</b>\n\n{sym}\n${price:.4f} × {qty}\nSize: ${size:.0f}\nScore: {opp['score']}/100", chart_url(sym))
+        except Exception as e: logger.error(f"Exec: {e}")
 
     def check_exits(self, positions):
-        for pos in positions:
+        for p in positions:
             try:
-                symbol = pos.symbol
-                unrealized_pct = float(pos.unrealized_plpc) * 100
-                should_exit = False
-                reason = ""
-                if unrealized_pct <= -5:
-                    should_exit = True
-                    reason = "Stop loss -5%"
-                elif unrealized_pct >= 3:
-                    should_exit = True
-                    reason = "Take profit +3%"
-
-                if should_exit:
+                pct = float(p.unrealized_plpc) * 100
+                if pct <= -5 or pct >= 3:
+                    reason = "Stop -5%" if pct <= -5 else "Take +3%"
                     rate_limit()
-                    qty = float(pos.qty)
-                    side = OrderSide.SELL if qty > 0 else OrderSide.BUY
-                    tif = TimeInForce.GTC if "/" in symbol else TimeInForce.DAY
-                    order = MarketOrderRequest(symbol=symbol, qty=abs(qty), side=side, time_in_force=tif)
-                    trading_client.submit_order(order)
-                    pnl = float(pos.unrealized_pl)
-                    if pnl > 0:
-                        reserve_amount = pnl * PROFIT_RESERVE_PCT
-                        c.execute("INSERT INTO reserve VALUES (NULL,?,?,?)", (datetime.now().isoformat(), reserve_amount, 0))
-                        conn.commit()
-                    msg = f"💰 <b>BOSS EXECUTED SELL</b>\n\n• {symbol}\n• {reason}\n• PnL: ${pnl:.2f}"
-                    send_telegram(msg)
-            except Exception as e:
-                logger.error(f"Exit error: {e}")
+                    tif = TimeInForce.GTC if "/" in p.symbol else TimeInForce.DAY
+                    side = OrderSide.SELL if float(p.qty) > 0 else OrderSide.BUY
+                    trading_client.submit_order(MarketOrderRequest(symbol=p.symbol, qty=abs(float(p.qty)), side=side, time_in_force=tif))
 
-    def learn(self):
-        try:
-            c.execute("SELECT * FROM trades WHERE timestamp > datetime('now', '-24 hours')")
-            recent = c.fetchall()
-            if len(recent) > 5:
-                wins = sum(1 for t in recent if t[6] and t[6] > 0)
-                win_rate = wins / len(recent)
-                if win_rate < 0.4:
-                    self.analyst.rsi_threshold = min(75, self.analyst.rsi_threshold + 2)
-                elif win_rate > 0.6:
-                    self.analyst.rsi_threshold = max(55, self.analyst.rsi_threshold - 2)
-                c.execute("INSERT INTO learning VALUES (NULL,?,?,?,?)", (datetime.now().isoformat(), self.analyst.rsi_threshold, win_rate, 0))
-                conn.commit()
-        except Exception as e:
-            logger.error(f"Learn error: {e}")
+                    pnl = float(p.unrealized_pl)
+                    if pnl > 0: c.execute("INSERT INTO reserve VALUES (NULL,?,?)", (datetime.now().isoformat(), pnl*0.3)); conn.commit()
 
-def morning_summary():
-    try:
-        account = get_account()
-        positions = get_positions()
-        c.execute("SELECT * FROM trades WHERE timestamp > datetime('now', '-12 hours') AND symbol LIKE '%/%'")
-        crypto_trades = c.fetchall()
-        pnl = sum(float(p.unrealized_pl) for p in positions)
-        msg = f"🌅 <b>MORNING BRIEFING</b>\n━━━━━━━━━━━━━\n\nPortfolio: ${float(account.portfolio_value):,.0f}\nOvernight PnL: ${pnl:.2f}\nCrypto trades: {len(crypto_trades)}"
-        send_telegram(msg)
-    except Exception as e:
-        logger.error(f"Morning error: {e}")
+                    send_tg(f"💰 <b>SELL EXECUTED</b>\n\n{p.symbol}\n{reason}\nPnL: ${pnl:+.2f}", chart_url(p.symbol))
+            except Exception as e: logger.error(f"Exit: {e}")
 
-def evening_summary():
-    try:
-        account = get_account()
-        c.execute("SELECT * FROM trades WHERE timestamp > datetime('now', '-24 hours')")
-        trades = c.fetchall()
-        wins = sum(1 for t in trades if t[6] and t[6] > 0)
-        total_pnl = sum(t[6] for t in trades if t[6])
-        msg = f"🌙 <b>EVENING CLOSE</b>\n━━━━━━━━━━━━━\n\nPortfolio: ${float(account.portfolio_value):,.0f}\nToday's trades: {len(trades)}\nWin rate: {wins}/{len(trades)}\nDay PnL: ${total_pnl:.2f}"
-        send_telegram(msg)
-    except Exception as e:
-        logger.error(f"Evening error: {e}")
-
+# ═══════════════════════════════════════════════════════════
+# MAIN
+# ═══════════════════════════════════════════════════════════
 def main():
-    logger.info("Boss v2.0 starting")
-    send_telegram("🤖 <b>BOSS v2.0 ONLINE</b>\n\nPaper trading active\n\nPinging on BUY, SELL, and HOLD decisions")
+    logger.info("BOSS starting")
+    send_tg("🤖 <b>BOSS v2.1 ONLINE</b>\n\nPaper trading active\n20 phrases loaded\nSleek mode: ON")
     boss = Boss()
-    last_morning = None
-    last_evening = None
     while True:
-        try:
-            now_et = datetime.now(pytz.timezone('US/Eastern'))
-            if now_et.hour == 7 and now_et.minute < 5 and last_morning!= now_et.date():
-                morning_summary()
-                last_morning = now_et.date()
-            if now_et.hour == 16 and now_et.minute < 10 and last_evening!= now_et.date():
-                evening_summary()
-                last_evening = now_et.date()
-            boss.scan()
-            time.sleep(10)
-        except KeyboardInterrupt:
-            break
-        except Exception as e:
-            logger.error(f"Main error: {e}")
-            time.sleep(30)
+        try: boss.scan(); time.sleep(10)
+        except Exception as e: logger.error(f"Main: {e}"); time.sleep(30)
 
-if __name__ == "__main__":
-    main()
+if __name__ == "__main__": main()
