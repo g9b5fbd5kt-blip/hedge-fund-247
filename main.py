@@ -386,23 +386,21 @@ class BigDogBot:
             self.trades_today += 1
 
             # Comprehensive Telegram alert
-            acct = trading_client.get_account()
+                        acct = trading_client.get_account()
+            price_display = f"{analysis['price']:.4f}" if is_crypto else f"{analysis['price']:.2f}"
+            
             msg = f"{'🟢 BUY' if side=='buy' else '🔴 SELL'} **{symbol}**\n\n"
-            msg += f"**Execution:** {qty} @ ${analysis['price']:.4f if is_crypto else f'{analysis[\"price\"]:.2f}'}\n"
+            msg += f"**Execution:** {qty} @ ${price_display}\n"
             msg += f"**Why:** {analysis['reason']}\n\n"
             msg += f"**Analysis:**\n"
             msg += f"• Score: {analysis['score']}/100\n"
             msg += f"• Confidence: {analysis['confidence']}%\n"
             msg += f"• RSI: {analysis['rsi']} | Trend: {analysis['trend']}\n"
-            msg += f"• Vol: {analysis['vol_ratio']}x | 24h: {analysis['change_24h']:+.1f}%\n"
-            msg += f"• BB Pos: {analysis['bb_position']:.0%} | MACD: {analysis['macd']:+.3f}\n\n"
+            msg += f"• Vol: {analysis['vol_ratio']}x | 24h: {analysis['change_24h']:+.1f}%\n\n"
             msg += f"**Portfolio:**\n"
             msg += f"• Equity: ${float(acct.equity):,.2f}\n"
-            msg += f"• Cash: ${float(acct.cash):,.2f}\n"
-            msg += f"• Buying Power: ${float(acct.buying_power):,.2f}\n"
             msg += f"• Positions: {len(self.positions)}/{MAX_POSITIONS}\n\n"
-            msg += f"**Today:** P&L ${self.daily_pnl:+.2f} | Trades: {self.trades_today}/{MAX_TRADES_PER_DAY}\n"
-            msg += f"**Regime:** {self.market_regime} | Efficiency: {self.efficiency:.1f}%"
+            msg += f"**Today:** P&L ${self.daily_pnl:+.2f} | Trades: {self.trades_today}/{MAX_TRADES_PER_DAY}"
 
             await self.send_tg(msg)
             return True
