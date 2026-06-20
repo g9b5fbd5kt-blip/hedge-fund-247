@@ -1,97 +1,90 @@
-import os, time, datetime, pytz, requests, sqlite3
+import os, time, threading, sqlite3, math, requests
 import alpaca_trade_api as tradeapi
-import matplotlib.pyplot as plt
-import pandas as pd
-import numpy as np
+from datetime import datetime, timezone
+from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes
 
-TOKEN = os.getenv("TELEGRAM_TOKEN")
-CHAT = os.getenv("TELEGRAM_CHAT")
-KEY = os.getenv("ALPACA_KEY")
-SECRET = os.getenv("ALPACA_SECRET")
-LIVE = os.getenv("LIVE_MODE","false")=="true"
+# --- ENV ---
+KEY = os.getenv("APCA_API_KEY_ID")
+SECRET = os.getenv("APCA_API_SECRET_KEY")
+LIVE = os.getenv("LIVE_MODE","false").lower()=="true"
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
 api = tradeapi.REST(KEY, SECRET, "https://api.alpaca.markets" if LIVE else "https://paper-api.alpaca.markets")
-tz = pytz.timezone('US/Eastern')
+bot = Bot(TELEGRAM_TOKEN)
 
-# persistent db
-conn = sqlite3.connect("/data/bot.db", check_same_thread=False)
-conn.execute("CREATE TABLE IF NOT EXISTS trades (ts TEXT, sym TEXT, side TEXT, qty REAL, price REAL, pnl REAL)")
+# --- DB (fixed for Railway: no /data volume needed) ---
+conn = sqlite3.connect("bot.db", check_same_thread=False)
+cur = conn.cursor()
+cur.execute("CREATE TABLE IF NOT EXISTS trades (id INTEGER PRIMARY KEY, ts TEXT, symbol TEXT, side TEXT, qty REAL, price REAL, pnl REAL)")
+conn.commit()
 
-def rsi(series, n=14):
-    delta = series.diff()
-    up = delta.clip(lower=0).ewm(alpha=1/n).mean()
-    down = -delta.clip(upper=0).ewm(alpha=1/n).mean()
-    return 100 - 100/(1+up/down)
+TICKERS = ["AAPL","MSFT","TSLA","NVDA","SPY"]
+RISK_PCT = 0.01
 
-def chart():
-    plt.style.use('dark_background')
-    fig, ax = plt.subplots(figsize=(10,5), facecolor='#0A0E14')
-    ax.set_facecolor('#0A0E14')
-    bars = api.get_bars("SPY", "5Min", limit=78).df
-    ax.plot(bars.index, bars.close, '#00FF88', lw=2.5)
-    ax.fill_between(bars.index, bars.close, bars.close.min(), alpha=0.15, color='#00FF88')
-    ax.set_title(f'SPY {bars.close.iloc[-1]:.2f} • RSI {rsi(bars.close).iloc[-1]:.0f}', color='white')
-    ax.grid(alpha=0.2)
-    plt.xticks(rotation=45)
-    plt.tight_layout()
-    p='/tmp/c.png'; plt.savefig(p, dpi=180, bbox_inches='tight'); plt.close(); return p
+def send(msg): 
+    try: bot.send_message(chat_id=CHAT_ID, text=msg)
+    except Exception as e: print("TG err",e)
 
-def think_and_trade():
-    acct = api.get_account()
-    eq = float(acct.equity); bp = float(acct.buying_power)
-    positions = {p.symbol: float(p.qty) for p in api.list_positions()}
+def get_price(sym):
+    try: return float(api.get_latest_trade(sym).price)
+    except: return 0
 
-    thoughts = []
-    action = "HOLD"
+def trade_logic():
+    while True:
+        try:
+            acct = api.get_account()
+            equity = float(acct.equity)
+            for sym in TICKERS:
+                price = get_price(sym)
+                if price==0: continue
+                # simple momentum: buy if up 0.3% in last minute (demo logic)
+                bars = api.get_bars(sym, "1Min", limit=2).df
+                if len(bars)<2: continue
+                change = (bars['close'].iloc[-1]-bars['close'].iloc[-2])/bars['close'].iloc[-2]
+                side = None
+                if change>0.003: side="buy"
+                elif change<-0.003: side="sell"
+                if side:
+                    qty = math.floor((equity*RISK_PCT)/price)
+                    if qty<1: continue
+                    try:
+                        api.submit_order(symbol=sym, qty=qty, side=side, type='market', time_in_force='day')
+                        cur.execute("INSERT INTO trades (ts,symbol,side,qty,price) VALUES (?,?,?,?,?)",
+                                    (datetime.now(timezone.utc).isoformat(), sym, side, qty, price))
+                        conn.commit()
+                        send(f"🔔 {side.upper()} {qty} {sym} @ ${price:.2f} | Δ{change*100:.2f}%")
+                    except Exception as e: print("order err",e)
+            time.sleep(60)
+        except Exception as e:
+            print("loop err",e); time.sleep(10)
 
-    for sym in ["SPY","QQQ","BTC/USD","ETH/USD"]:
-        bars = api.get_bars(sym, "1Min", limit=20).df
-        if len(bars)<20: continue
-        last = bars.close.iloc[-1]
-        chg = (last/bars.close.iloc[-5]-1)*100
-        r = rsi(bars.close).iloc[-1]
-        ema = bars.close.ewm(span=20).mean().iloc[-1]
+async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    kb = [[InlineKeyboardButton("📊 Status", callback_data="status"),
+           InlineKeyboardButton("📈 Chart", callback_data="chart")]]
+    await update.message.reply_text("Hedge Fund 24/7 is LIVE (Paper mode)", reply_markup=InlineKeyboardMarkup(kb))
 
-        thoughts.append(f"• {sym}: {chg:+.2f}% • RSI {r:.0f} • {'below' if last<ema else 'above'} EMA")
+async def button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query; await q.answer()
+    if q.data=="status":
+        acct = api.get_account()
+        await q.edit_message_text(f"Equity: ${float(acct.equity):,.2f}\nP/L: ${float(acct.unrealized_pl):,.2f}\nMode: {'LIVE' if LIVE else 'PAPER'}")
+    elif q.data=="chart":
+        # send simple price chart
+        sym="SPY"; bars=api.get_bars(sym,"5Min",limit=50).df
+        import matplotlib.pyplot as plt
+        plt.figure(); bars['close'].plot(); plt.title(f"{sym} 5m"); plt.tight_layout()
+        plt.savefig("/tmp/chart.png"); plt.close()
+        await ctx.bot.send_photo(chat_id=q.message.chat_id, photo=open("/tmp/chart.png","rb"))
 
-        # strategy: oversold bounce with trend filter
-        if sym in positions: continue
-        if len(positions)>=3 or bp<25: continue
-        if chg < -0.5 and r < 35 and last > ema*0.998:
-            qty = 1 if '/' not in sym else 0.001
-            try:
-                api.submit_order(sym, qty, "buy", "market", "day",
-                    order_class="bracket",
-                    stop_loss={"stop_price": round(last*0.99,2)},
-                    take_profit={"limit_price": round(last*1.015,2)})
-                conn.execute("INSERT INTO trades VALUES (?,?,?,?,?,?)",
-                    (datetime.datetime.now().isoformat(), sym, "BUY", qty, last, 0))
-                conn.commit()
-                action = f"BUY {sym} @ ${last:.2f} (RSI {r:.0f})"
-                break
-            except Exception as e:
-                thoughts.append(f" ⚠️ {e}")
+def run_bot():
+    send("✅ Hedge Fund 24/7 is LIVE (Paper mode) – Send /help")
+    app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CallbackQueryHandler(button))
+    app.run_polling()
 
-    # build message
-    now = datetime.datetime.now(tz)
-    msg = f"🤖 *MARKET ANALYSIS AI* • {'LIVE' if LIVE else 'PAPER'}\n"
-    msg += f"🕒 {now.strftime('%I:%M %p ET')}\n\n"
-    msg += f"💭 *THINKING:*\n" + "\n".join(thoughts[:4]) + f"\n• Decision: {action}\n\n"
-    msg += f"📊 *PORTFOLIO:*\n💵 Equity: ${eq:,.2f}\n💰 BP: ${bp:,.2f}\n📈 Positions: {len(positions)}/3"
-
-    requests.post(f"https://api.telegram.org/bot{TOKEN}/sendPhoto",
-        data={"chat_id":CHAT, "caption":msg, "parse_mode":"Markdown"},
-        files={"photo": open(chart(),'rb')})
-
-# main loop
-while True:
-    try:
-        et = datetime.datetime.now(tz)
-        # run every 5 min, plus summaries at 8,16,22
-        if et.minute % 5 == 0:
-            think_and_trade()
-        time.sleep(55)
-    except Exception as e:
-        requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage",
-            json={"chat_id":CHAT, "text": f"🚨 {e}"})
-        time.sleep(60)
+if __name__=="__main__":
+    threading.Thread(target=trade_logic, daemon=True).start()
+    run_bot()
