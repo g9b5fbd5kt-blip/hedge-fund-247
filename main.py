@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """
-Ethan's Trading Bot v3.1 - "Big Dog" Edition - FULL 200 UPGRADES
-Fixed syntax - ready for Railway
+Ethan's Trading Bot v3.1 - "Big Dog" Edition - ALL 200 UPGRADES + PHRASE ROTATION
 """
 
 import os
@@ -10,6 +9,7 @@ import sqlite3
 import logging
 import asyncio
 import json
+import random
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 import pandas as pd
@@ -23,7 +23,7 @@ from alpaca.data.timeframe import TimeFrame
 from telegram import Bot
 import pytz
 
-# ==================== YOUR EXACT RAILWAY VARS ====================
+# ==================== YOUR RAILWAY VARS ====================
 APCA_API_KEY_ID = os.getenv('APCA_API_KEY_ID')
 APCA_API_SECRET_KEY = os.getenv('APCA_API_SECRET_KEY')
 TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
@@ -31,7 +31,34 @@ TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
 LIVE_MODE = os.getenv('LIVE_MODE', 'false').lower() == 'true'
 PAPER_TRADING = not LIVE_MODE
 
-# ==================== CONFIGURATION ====================
+# ==================== BIG DOG PHRASES ====================
+BUY_PHRASES = [
+    "🐕 BIG DOG STATUS",
+    "💎 BIG PIMPIN",
+    "🚀 ALPHA MOVE",
+    "🔥 WHALE ALERT",
+    "💰 DIAMOND HANDS LOADING",
+    "⚡ SENDING IT",
+    "🎯 SNIPER ENTRY",
+    "👑 KING SHIT",
+    "💪 BUILT DIFFERENT",
+    "🦍 APE MODE"
+]
+
+SELL_PHRASES = [
+    "💸 CASHIN OUT",
+    "🏦 PROFIT SECURED",
+    "✌️ BIG DOG EXIT",
+    "💵 TAKING CHIPS",
+    "🎰 HOUSE MONEY",
+    "📈 BAG SECURED",
+    "🔒 LOCKING GAINS",
+    "💳 PRINTING",
+    "🚪 BOUNCING",
+    "💎 PAPER HANDED PROFITS"
+]
+
+# ==================== CONFIG ====================
 MAX_POSITION_SIZE = 200
 MAX_DAILY_LOSS = 500
 MAX_POSITIONS = 6
@@ -350,7 +377,7 @@ class BigDogBot:
                 symbol=symbol,
                 qty=qty,
                 side=OrderSide.BUY if side == 'buy' else OrderSide.SELL,
-                time_in_force=TimeInForce.DAY,
+                time_in_force=TimeInForce.GTC if is_crypto else TimeInForce.DAY,
                 limit_price=round(limit_price, 4 if is_crypto else 2)
             )
 
@@ -372,22 +399,20 @@ class BigDogBot:
             acct = trading_client.get_account()
             price_display = f"{analysis['price']:.4f}" if is_crypto else f"{analysis['price']:.2f}"
 
-            msg = f"{'🟢 BUY' if side=='buy' else '🔴 SELL'} **{symbol}**\n\n"
-            msg += f"**Execution:** {qty} @ ${price_display}\n"
+            phrase = random.choice(BUY_PHRASES if side == 'buy' else SELL_PHRASES)
+
+            msg = f"{phrase}\n\n"
+            msg += f"**{symbol}** {'🟢' if side=='buy' else '🔴'} {qty} @ ${price_display}\n\n"
             msg += f"**Why:** {analysis['reason']}\n\n"
             msg += f"**Analysis:**\n"
             msg += f"• Score: {analysis['score']}/100\n"
             msg += f"• Confidence: {analysis['confidence']}%\n"
             msg += f"• RSI: {analysis['rsi']} | Trend: {analysis['trend']}\n"
-            msg += f"• Vol: {analysis['vol_ratio']}x | 24h: {analysis['change_24h']:+.1f}%\n"
-            msg += f"• BB Pos: {analysis['bb_position']:.0%} | MACD: {analysis['macd']:+.3f}\n\n"
+            msg += f"• Vol: {analysis['vol_ratio']}x | 24h: {analysis['change_24h']:+.1f}%\n\n"
             msg += f"**Portfolio:**\n"
             msg += f"• Equity: ${float(acct.equity):,.2f}\n"
-            msg += f"• Cash: ${float(acct.cash):,.2f}\n"
-            msg += f"• Buying Power: ${float(acct.buying_power):,.2f}\n"
             msg += f"• Positions: {len(self.positions)}/{MAX_POSITIONS}\n\n"
-            msg += f"**Today:** P&L ${self.daily_pnl:+.2f} | Trades: {self.trades_today}/{MAX_TRADES_PER_DAY}\n"
-            msg += f"**Regime:** {self.market_regime} | Efficiency: {self.efficiency:.1f}%"
+            msg += f"**Today:** ${self.daily_pnl:+.2f} | {self.trades_today}/{MAX_TRADES_PER_DAY} trades"
 
             await self.send_tg(msg)
             return True
