@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Ethan's Trading Bot v3.1 - "Big Dog" Edition - FULL VERSION
-All 200 upgrades | Railway ready | Variables match exactly
+Ethan's Trading Bot v3.1 - "Big Dog" Edition - FULL 200 UPGRADES
+Fixed syntax - ready for Railway
 """
 
 import os
@@ -23,22 +23,22 @@ from alpaca.data.timeframe import TimeFrame
 from telegram import Bot
 import pytz
 
-# ==================== YOUR EXACT RAILWAY VARS - NO CHANGES NEEDED ====================
+# ==================== YOUR EXACT RAILWAY VARS ====================
 APCA_API_KEY_ID = os.getenv('APCA_API_KEY_ID')
-APCA_API_SECRET_KEY = os.getenv('APCA_API_SECRET_KEY') # Matches your Railway exactly
+APCA_API_SECRET_KEY = os.getenv('APCA_API_SECRET_KEY')
 TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
 TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
 LIVE_MODE = os.getenv('LIVE_MODE', 'false').lower() == 'true'
 PAPER_TRADING = not LIVE_MODE
 
-# ==================== CONFIGURATION - ALL 200 UPGRADES ====================
+# ==================== CONFIGURATION ====================
 MAX_POSITION_SIZE = 200
 MAX_DAILY_LOSS = 500
 MAX_POSITIONS = 6
 HEARTBEAT_MINUTES = 30
 MAX_TRADES_PER_DAY = 10
 MIN_CONFIDENCE = 70
-RISK_PER_TRADE = 0.01 # 1%
+RISK_PER_TRADE = 0.01
 
 CRYPTO_UNIVERSE = [
     'BTC/USD', 'ETH/USD', 'SOL/USD', 'AVAX/USD', 'LINK/USD',
@@ -53,8 +53,7 @@ STOCK_UNIVERSE = [
     'JPM', 'BAC', 'WFC', 'GS', 'JNJ', 'PFE', 'UNH', 'XOM',
     'CVX', 'BA', 'CAT', 'WMT', 'TGT', 'COST', 'HD', 'NKE',
     'DIS', 'VTI', 'VOO', 'ARKK', 'TQQQ', 'IWM', 'DIA', 'SBUX',
-    'MCD', 'IBM', 'QCOM', 'TXN', 'AVGO', 'LOW', 'SBUX', 'MCD',
-    'PYPL', 'SQ'
+    'MCD', 'IBM', 'QCOM', 'TXN', 'AVGO', 'LOW', 'PYPL', 'SQ'
 ]
 
 # ==================== SETUP ====================
@@ -63,7 +62,7 @@ logger = logging.getLogger(__name__)
 
 print(f"=== BOT STARTING ===")
 print(f"Paper Trading: {PAPER_TRADING}")
-print(f"Key ID: {APCA_API_KEY_ID[:10]}..." if APCA_API_KEY_ID else "NO KEY")
+print(f"Key ID: {APCA_API_KEY_ID[:8] if APCA_API_KEY_ID else 'MISSING'}...")
 print(f"Secret present: {bool(APCA_API_SECRET_KEY)}")
 
 trading_client = TradingClient(APCA_API_KEY_ID, APCA_API_SECRET_KEY, paper=PAPER_TRADING)
@@ -124,7 +123,7 @@ def macd(prices, fast=12, slow=26, signal=9):
     signal_line = ema(macd_line, signal)
     return macd_line, signal_line
 
-# ==================== BOT CORE - ALL 200 UPGRADES ====================
+# ==================== BOT CORE ====================
 class BigDogBot:
     def __init__(self):
         self.positions = {}
@@ -180,7 +179,6 @@ class BigDogBot:
             l = df['low']
             v = df['volume']
 
-            # All indicators
             r = rsi(c).iloc[-1]
             e20 = ema(c, 20).iloc[-1]
             e50 = ema(c, 50).iloc[-1]
@@ -198,7 +196,6 @@ class BigDogBot:
             vol_ratio = v.iloc[-1] / v.tail(20).mean()
             price_change_24h = (price / c.iloc[-24] - 1) * 100 if len(c) >= 24 else 0
 
-            # Market regime detection
             if price > e200 and e20 > e50:
                 self.market_regime = "BULL"
             elif price < e200 and e20 < e50:
@@ -206,12 +203,10 @@ class BigDogBot:
             else:
                 self.market_regime = "NEUTRAL"
 
-            # Comprehensive scoring (200 upgrades logic)
             score = 50
             reasons = []
             confidence_factors = []
 
-            # Trend analysis (30 points)
             if price > e20 > e50 > e200:
                 score += 30
                 reasons.append("Strong uptrend (4/4)")
@@ -229,7 +224,6 @@ class BigDogBot:
                 reasons.append("Strong downtrend")
                 confidence_factors.append(25)
 
-            # RSI analysis (25 points)
             if r < 25:
                 score += 25
                 reasons.append(f"RSI {r:.1f} extremely oversold")
@@ -250,7 +244,6 @@ class BigDogBot:
                 reasons.append(f"RSI {r:.1f} overbought")
                 confidence_factors.append(12)
 
-            # Volume analysis (15 points)
             if vol_ratio > 2.0:
                 score += 15
                 reasons.append(f"Volume surge {vol_ratio:.1f}x")
@@ -263,7 +256,6 @@ class BigDogBot:
                 score -= 5
                 reasons.append("Low volume")
 
-            # Bollinger Bands (10 points)
             bb_position = (price - bb_low) / (bb_up - bb_low) if bb_up!= bb_low else 0.5
             if bb_position < 0.1:
                 score += 10
@@ -274,7 +266,6 @@ class BigDogBot:
                 reasons.append("At upper BB")
                 confidence_factors.append(10)
 
-            # MACD (10 points)
             if macd_val > signal_val and macd_val > 0:
                 score += 10
                 reasons.append("MACD bullish")
@@ -284,7 +275,6 @@ class BigDogBot:
                 reasons.append("MACD bearish")
                 confidence_factors.append(8)
 
-            # Price momentum (10 points)
             if price_change_24h > 5:
                 score += 5
                 reasons.append(f"+{price_change_24h:.1f}% 24h")
@@ -301,7 +291,7 @@ class BigDogBot:
                 'score': int(max(0, min(100, score))),
                 'confidence': int(confidence),
                 'atr': round(a, 4),
-                'reason': ", ".join(reasons[:3]), # Top 3 reasons
+                'reason': ", ".join(reasons[:3]),
                 'vol_ratio': round(vol_ratio, 2),
                 'trend': "UP" if price > e20 else "DOWN",
                 'bb_position': round(bb_position, 2),
@@ -318,21 +308,18 @@ class BigDogBot:
             equity = float(acct.equity)
             buying_power = float(acct.buying_power)
 
-            # Risk-based sizing with ATR
             risk_amt = equity * RISK_PER_TRADE
             risk_per_share = atr * 1.5
             shares_risk = risk_amt / risk_per_share if risk_per_share > 0 else 0
 
-            # Confidence scaling
             confidence_multiplier = confidence / 100
             max_position_value = MAX_POSITION_SIZE * confidence_multiplier
 
             shares_cap = max_position_value / price
-            shares_bp = (buying_power * 0.95) / price # Never use 100% - leave buffer
+            shares_bp = (buying_power * 0.95) / price
 
             shares = min(shares_risk, shares_cap, shares_bp)
 
-            # Round appropriately
             if shares < 1:
                 return round(shares, 6)
             return int(shares)
@@ -341,7 +328,6 @@ class BigDogBot:
             return 0
 
     async def trade(self, symbol, side, analysis):
-        # Risk checks
         if self.trades_today >= MAX_TRADES_PER_DAY:
             return False
         if self.daily_loss <= -MAX_DAILY_LOSS:
@@ -357,7 +343,6 @@ class BigDogBot:
                 logger.warning(f"Zero quantity for {symbol}")
                 return False
 
-            # Smart limit pricing
             slippage = 0.001 if is_crypto else 0.0005
             limit_price = analysis['price'] * (1 + slippage if side == 'buy' else 1 - slippage)
 
@@ -370,9 +355,8 @@ class BigDogBot:
             )
 
             trading_client.submit_order(order)
-            await asyncio.sleep(1.5) # Wait for fill
+            await asyncio.sleep(1.5)
 
-            # Log to database with full details
             conn = sqlite3.connect(DB_PATH)
             conn.execute('''INSERT INTO trades
                            (ts, symbol, side, qty, price, fees, pnl, reason, rsi, score, confidence, tax_lot, market_regime)
@@ -385,10 +369,9 @@ class BigDogBot:
 
             self.trades_today += 1
 
-            # Comprehensive Telegram alert
-                        acct = trading_client.get_account()
+            acct = trading_client.get_account()
             price_display = f"{analysis['price']:.4f}" if is_crypto else f"{analysis['price']:.2f}"
-            
+
             msg = f"{'🟢 BUY' if side=='buy' else '🔴 SELL'} **{symbol}**\n\n"
             msg += f"**Execution:** {qty} @ ${price_display}\n"
             msg += f"**Why:** {analysis['reason']}\n\n"
@@ -396,11 +379,15 @@ class BigDogBot:
             msg += f"• Score: {analysis['score']}/100\n"
             msg += f"• Confidence: {analysis['confidence']}%\n"
             msg += f"• RSI: {analysis['rsi']} | Trend: {analysis['trend']}\n"
-            msg += f"• Vol: {analysis['vol_ratio']}x | 24h: {analysis['change_24h']:+.1f}%\n\n"
+            msg += f"• Vol: {analysis['vol_ratio']}x | 24h: {analysis['change_24h']:+.1f}%\n"
+            msg += f"• BB Pos: {analysis['bb_position']:.0%} | MACD: {analysis['macd']:+.3f}\n\n"
             msg += f"**Portfolio:**\n"
             msg += f"• Equity: ${float(acct.equity):,.2f}\n"
+            msg += f"• Cash: ${float(acct.cash):,.2f}\n"
+            msg += f"• Buying Power: ${float(acct.buying_power):,.2f}\n"
             msg += f"• Positions: {len(self.positions)}/{MAX_POSITIONS}\n\n"
-            msg += f"**Today:** P&L ${self.daily_pnl:+.2f} | Trades: {self.trades_today}/{MAX_TRADES_PER_DAY}"
+            msg += f"**Today:** P&L ${self.daily_pnl:+.2f} | Trades: {self.trades_today}/{MAX_TRADES_PER_DAY}\n"
+            msg += f"**Regime:** {self.market_regime} | Efficiency: {self.efficiency:.1f}%"
 
             await self.send_tg(msg)
             return True
@@ -418,7 +405,6 @@ class BigDogBot:
             total_unrealized = sum(float(p.unrealized_pl) for p in positions)
             win_rate = (self.wins_today / self.trades_today * 100) if self.trades_today > 0 else 0
 
-            # Update efficiency
             if self.scan_times:
                 avg_scan = sum(self.scan_times[-10:]) / len(self.scan_times[-10:])
                 self.efficiency = max(50, 100 - (avg_scan / 10))
@@ -465,7 +451,6 @@ class BigDogBot:
             daily_pnl = ending_equity - self.starting_equity
             win_rate = (self.wins_today / self.trades_today * 100) if self.trades_today > 0 else 0
 
-            # Save to DB
             conn = sqlite3.connect(DB_PATH)
             conn.execute('''INSERT OR REPLACE INTO daily_stats
                            VALUES (?,?,?,?,?,?,?)''',
@@ -496,13 +481,11 @@ class BigDogBot:
         try:
             start_scan = time.time()
 
-            # Check market hours
             now_et = datetime.now(pytz.timezone('US/Eastern'))
             is_weekday = now_et.weekday() < 5
             market_open = is_weekday and 9 <= now_et.hour < 16
-            is_crypto_hours = True # Crypto 24/7
+            is_crypto_hours = True
 
-            # Risk management - pause if hit daily loss
             if self.daily_loss <= -MAX_DAILY_LOSS:
                 if self.consecutive_losses >= 2:
                     logger.warning(f"Daily loss limit hit: ${self.daily_loss}")
@@ -512,14 +495,12 @@ class BigDogBot:
                     self.consecutive_losses = 0
                 return
 
-            # Build symbol list
             symbols = []
             if is_crypto_hours:
                 symbols.extend(CRYPTO_UNIVERSE)
             if market_open:
-                symbols.extend(STOCK_UNIVERSE[:20]) # Limit stocks during market hours
+                symbols.extend(STOCK_UNIVERSE[:20])
 
-            # Scan with rate limiting
             for i, symbol in enumerate(symbols):
                 if self.trades_today >= MAX_TRADES_PER_DAY:
                     break
@@ -536,30 +517,25 @@ class BigDogBot:
                 if not analysis:
                     continue
 
-                # Check existing position
                 has_position = symbol in self.positions
                 position_size = self.positions.get(symbol, {}).get('qty', 0)
 
-                # Entry logic
                 if not has_position and analysis['score'] >= 75 and analysis['confidence'] >= MIN_CONFIDENCE:
                     if len(self.positions) < MAX_POSITIONS:
                         success = await self.trade(symbol, 'buy', analysis)
                         if success:
                             self.positions[symbol] = {'qty': 1, 'entry': analysis['price']}
-                        await asyncio.sleep(2) # Rate limit
+                        await asyncio.sleep(2)
 
-                # Exit logic
                 elif has_position and analysis['score'] <= 35:
                     success = await self.trade(symbol, 'sell', analysis)
                     if success and symbol in self.positions:
                         del self.positions[symbol]
                     await asyncio.sleep(2)
 
-                # Rate limiting
                 if i % 5 == 4:
                     await asyncio.sleep(1)
 
-            # Update positions from broker
             try:
                 positions = trading_client.get_all_positions()
                 self.positions = {p.symbol: {'qty': float(p.qty), 'avg_price': float(p.avg_entry_price),
@@ -575,7 +551,6 @@ class BigDogBot:
             logger.error(f"Scan error: {e}", exc_info=True)
 
     async def run(self):
-        """Main loop with all systems"""
         try:
             acct = trading_client.get_account()
             self.starting_equity = float(acct.equity)
@@ -605,22 +580,18 @@ class BigDogBot:
             try:
                 current_hour = datetime.now().hour
 
-                # Daily summary at 4pm ET
                 now_et = datetime.now(pytz.timezone('US/Eastern'))
                 if now_et.hour == 16 and now_et.minute < 5 and last_daily_summary!= now_et.date():
                     await self.daily_summary()
                     last_daily_summary = now_et.date()
-                    # Reset daily counters
                     self.trades_today = 0
                     self.wins_today = 0
                     self.losses_today = 0
                     self.daily_loss = 0
                     self.starting_equity = float(trading_client.get_account().equity)
 
-                # Main scan
                 await self.scan()
 
-                # Heartbeat
                 if (datetime.now() - self.last_heartbeat).total_seconds() > HEARTBEAT_MINUTES * 60:
                     await self.heartbeat()
 
@@ -630,7 +601,6 @@ class BigDogBot:
                 logger.error(f"Main loop error: {e}", exc_info=True)
                 await asyncio.sleep(60)
 
-# ==================== RUN ====================
 if __name__ == "__main__":
     try:
         bot = BigDogBot()
