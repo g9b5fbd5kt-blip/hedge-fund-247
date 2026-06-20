@@ -1,6 +1,6 @@
 """
 v2.0 Money Printer Pro - Boss Trading System
-Uses Railway variables: APCA_API_KEY_ID, APCA_API_SECRET_KEY
+Fixed for crypto time_in_force
 """
 
 import os
@@ -18,7 +18,6 @@ from alpaca.data.historical import StockHistoricalDataClient, CryptoHistoricalDa
 from alpaca.data.requests import StockBarsRequest, CryptoBarsRequest
 from alpaca.data.timeframe import TimeFrame
 
-# ========== CONFIG - USES YOUR RAILWAY NAMES ==========
 ALPACA_KEY = os.getenv("APCA_API_KEY_ID")
 ALPACA_SECRET = os.getenv("APCA_API_SECRET_KEY")
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -52,7 +51,6 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("Boss")
 
 if not ALPACA_KEY or not ALPACA_SECRET:
-    logger.error("MISSING API KEYS")
     raise ValueError("APCA_API_KEY_ID and APCA_API_SECRET_KEY required")
 
 trading_client = TradingClient(ALPACA_KEY, ALPACA_SECRET, paper=PAPER)
@@ -229,7 +227,8 @@ class Boss:
                     return
 
             rate_limit()
-            order = MarketOrderRequest(symbol=symbol, qty=qty, side=OrderSide.BUY, time_in_force=TimeInForce.DAY)
+            tif = TimeInForce.GTC if "/" in symbol else TimeInForce.DAY
+            order = MarketOrderRequest(symbol=symbol, qty=qty, side=OrderSide.BUY, time_in_force=tif)
             trading_client.submit_order(order)
 
             phrase = random.choice(PHRASES)
@@ -260,7 +259,8 @@ class Boss:
                     rate_limit()
                     qty = float(pos.qty)
                     side = OrderSide.SELL if qty > 0 else OrderSide.BUY
-                    order = MarketOrderRequest(symbol=symbol, qty=abs(qty), side=side, time_in_force=TimeInForce.DAY)
+                    tif = TimeInForce.GTC if "/" in symbol else TimeInForce.DAY
+                    order = MarketOrderRequest(symbol=symbol, qty=abs(qty), side=side, time_in_force=tif)
                     trading_client.submit_order(order)
                     pnl = float(pos.unrealized_pl)
                     if pnl > 0:
