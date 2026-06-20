@@ -3,3 +3,6 @@ python-telegram-bot==21.6
 requests==2.32.3
 matplotlib==3.9.2
 pandas==2.2.2
+alpaca-py
+pytz
+requests
