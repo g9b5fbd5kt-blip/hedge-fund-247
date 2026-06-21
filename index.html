@@ -1,1 +1,109 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"><meta name="theme-color" content="#000000"><title>Beast Mode</title><script src="https://unpkg.com/lightweight-charts@4.1.0/dist/lightweight-charts.standalone.production.js"></script><style>*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}body{background:#000;color:#fff;font-family:-apple-system,BlinkMacSystemFont,'SF Pro Display',system-ui;overscroll-behavior:none;touch-action:manipulation}.app{height:100vh;height:100dvh;display:flex;flex-direction:column;background:linear-gradient(180deg,#0a0a0a 0%,#000 100%)}.status{height:44px;display:flex;align-items:center;justify-content:space-between;padding:0 16px;background:rgba(20,20,20,.8);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border-bottom:1px solid rgba(255,255,255,.08);position:sticky;top:0;z-index:100}.logo{font-weight:700;font-size:17px;letter-spacing:-.3px;background:linear-gradient(90deg,#00d395,#00b884);-webkit-background-clip:text;-webkit-text-fill-color:transparent}.live{display:flex;align-items:center;gap:6px;font-size:12px;color:#888}.dot{width:8px;height:8px;border-radius:50%;background:#00d395;animation:pulse 2s infinite}@keyframes pulse{0%,100%{
+<!DOCTYPE html>
+<html>
+<head>
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Beast Mode</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#000;color:#fff;font-family:-apple-system,system-ui;margin:0;overflow:hidden}
+.header{height:50px;background:#111;display:flex;align-items:center;justify-content:space-between;padding:0 16px;border-bottom:1px solid #222}
+.logo{color:#00d395;font-weight:700;font-size:18px}
+.live{color:#666;font-size:12px}
+.metrics{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;padding:12px}
+.card{background:#111;border:1px solid #222;border-radius:12px;padding:14px;text-align:center}
+.label{font-size:10px;color:#666;text-transform:uppercase;margin-bottom:4px}
+.value{font-size:22px;font-weight:600}
+.value.green{color:#00d395}
+.nav{position:fixed;bottom:0;left:0;right:0;height:70px;background:#111;border-top:1px solid #222;display:flex;justify-content:space-around;align-items:center;padding-bottom:10px}
+.nav-item{color:#666;text-align:center;font-size:11px}
+.nav-item.active{color:#00d395}
+.content{height:calc(100vh - 190px);overflow:auto;padding:16px}
+.watch-item{background:#111;border:1px solid #222;border-radius:12px;padding:14px;margin-bottom:10px;display:flex;justify-content:space-between}
+.symbol{font-weight:600;margin-bottom:4px}
+.price{font-family:monospace;font-size:16px}
+.change{font-size:12px}
+.change.up{color:#00d395}
+.change.down{color:#ff3b30}
+</style>
+</head>
+<body>
+<div class="header">
+  <div class="logo">BEAST MODE</div>
+  <div class="live">● LIVE</div>
+</div>
+
+<div class="metrics">
+  <div class="card">
+    <div class="label">Capital</div>
+    <div class="value" id="cap">$1,005</div>
+  </div>
+  <div class="card">
+    <div class="label">Today</div>
+    <div class="value green" id="pnl">+$0</div>
+  </div>
+  <div class="card">
+    <div class="label">Trades</div>
+    <div class="value" id="trades">0</div>
+  </div>
+</div>
+
+<div class="content" id="content">
+  <div style="color:#666;text-align:center;padding:40px 20px">
+    <div style="font-size:48px;margin-bottom:16px">📊</div>
+    <div style="font-size:16px;margin-bottom:8px">AI Trading Active</div>
+    <div style="font-size:13px">Monitoring 7 markets 24/7</div>
+  </div>
+  
+  <div id="watchlist"></div>
+</div>
+
+<div class="nav">
+  <div class="nav-item active">📊<br>Trade</div>
+  <div class="nav-item">💼<br>Positions</div>
+  <div class="nav-item">📈<br>History</div>
+  <div class="nav-item">🤖<br>AI</div>
+</div>
+
+<script>
+const stocks = [
+  {s:'BTC/USD', p:43250, c:1.48},
+  {s:'ETH/USD', p:2245, c:1.02},
+  {s:'SOL/USD', p:98.4, c:-0.32},
+  {s:'SPY', p:475.2, c:0.54},
+  {s:'QQQ', p:408.7, c:0.81},
+  {s:'TSLA', p:242.1, c:-1.24},
+  {s:'NVDA', p:875.3, c:2.14}
+];
+
+function render() {
+  const w = document.getElementById('watchlist');
+  w.innerHTML = '<div style="color:#666;font-size:12px;text-transform:uppercase;margin:20px 0 10px 4px;letter-spacing:1px">Watchlist</div>';
+  stocks.forEach(s => {
+    const d = document.createElement('div');
+    d.className = 'watch-item';
+    d.innerHTML = `<div><div class="symbol">${s.s}</div><div style="color:#666;font-size:12px">${s.s.includes('/')?'Crypto':'Stock'}</div></div><div style="text-align:right"><div class="price">$${s.p.toLocaleString()}</div><div class="change ${s.c>=0?'up':'down'}">${s.c>=0?'+':''}${s.c.toFixed(2)}%</div></div>`;
+    w.appendChild(d);
+  });
+}
+
+async function update() {
+  try {
+    const r = await fetch('/api/status');
+    const d = await r.json();
+    document.getElementById('cap').textContent = '$' + Math.round(d.capital).toLocaleString();
+    document.getElementById('pnl').textContent = (d.daily_pnl>=0?'+':'') + '$' + Math.abs(d.daily_pnl||0).toFixed(0);
+    document.getElementById('trades').textContent = d.stats.total || 0;
+  } catch(e) {}
+}
+
+render();
+update();
+setInterval(update, 5000);
+setInterval(() => {
+  stocks.forEach(s => s.p *= (1 + (Math.random()-0.5)*0.002));
+  render();
+}, 3000);
+</script>
+</body>
+</html>
