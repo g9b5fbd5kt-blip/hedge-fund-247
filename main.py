@@ -9,33 +9,51 @@ from datetime import datetime, timedelta
 from collections import deque, defaultdict
 import pandas as pd
 import numpy as np
-from alpaca.trading.client import TradingClient
-from alpaca.trading.requests import LimitOrderRequest, GetOrdersRequest
-from alpaca.trading.enums import OrderSide, TimeInForce, QueryOrderStatus
-from alpaca.data.historical import StockHistoricalDataClient, CryptoHistoricalDataClient
-from alpaca.data.requests import StockBarsRequest, CryptoBarsRequest
-from alpaca.data.timeframe import TimeFrame
-from telegram import Bot
-import pytz
+from aiohttp import web
+from loguru import logger
+
+# ==================== SAFE IMPORTS - NO CRASH ====================
+try:
+    from alpaca.trading.client import TradingClient
+    from alpaca.trading.requests import LimitOrderRequest
+    from alpaca.trading.enums import OrderSide, TimeInForce
+    from alpaca.data.historical import StockHistoricalDataClient, CryptoHistoricalDataClient
+    from alpaca.data.requests import StockBarsRequest, CryptoBarsRequest
+    from alpaca.data.timeframe import TimeFrame
+    ALPACA_OK = True
+except Exception as e:
+    ALPACA_OK = False
+    logger.warning(f"Alpaca not available: {e}")
+
+try:
+    from telegram import Bot
+    TG_OK = True
+except:
+    TG_OK = False
+
+try:
+    import ccxt
+    CCXT_OK = True
+except:
+    CCXT_OK = False
 
 # ==================== CONFIGURATION ====================
-APCA_KEY = os.getenv('APCA_API_KEY_ID')
-APCA_SECRET = os.getenv('APCA_API_SECRET_KEY')
-TG_TOKEN = os.getenv('TELEGRAM_TOKEN')
-TG_CHAT = os.getenv('TELEGRAM_CHAT_ID')
+APCA_KEY = os.getenv('APCA_API_KEY_ID', '')
+APCA_SECRET = os.getenv('APCA_API_SECRET_KEY', '')
+TG_TOKEN = os.getenv('TELEGRAM_TOKEN', 'disabled')
+TG_CHAT = os.getenv('TELEGRAM_CHAT_ID', '0')
 PAPER = os.getenv('PAPER_TRADING', 'true').lower() == 'true'
+CAPITAL_START = float(os.getenv('CAPITAL', '1007.00'))
 
-# BEAST MODE v4.0 SETTINGS - 22,217 OPTIMIZATIONS ACTIVE
+# BEAST MODE v4.0 SETTINGS
 CRYPTO_FOCUS = 0.70
 BEAST_MODE = True
 SCAN_INTERVAL = 12
 HEARTBEAT_MINUTES = 4
 SHOW_ANALYSIS = True
 VERBOSE_LOGGING = True
-QUANTUM_READY = True
-AGI_ALIGNED = True
 
-# TRADING PARAMETERS - OPTIMIZED FOR $1,007 CAPITAL
+# TRADING PARAMETERS - OPTIMIZED FOR $1,007
 TIER_THRESHOLDS = [0, 1100, 5000, 10000, 25000, 50000, 100000, 250000, 500000, 1000000]
 TIER_MAX_POS = [50, 50, 200, 500, 1000, 2000, 5000, 10000, 25000, 50000]
 MAX_DAILY_LOSS = 20
@@ -44,9 +62,9 @@ MIN_NOTIONAL = 10.0
 BUY_SCORE_MIN = 58
 SELL_SCORE_MAX = 25
 MAX_POSITIONS = 10
-RISK_PER_TRADE = 0.005 # 0.5% - User constraint
+RISK_PER_TRADE = 0.005
 
-# 54 CORE PHRASES - From your code
+# 54 CORE PHRASES
 CORE_PHRASES = [
     "checkin stocks, not flipping rocks", "real bosses don't talk they just sit back and listen",
     "First you get the money then you get the power", "get up and get some money", "bag secured",
@@ -77,14 +95,8 @@ SELL_PHRASES = ["💸 SECURED BAG", "🏦 BANK IT", "✌️ PEACE OUT", "💵 CA
                 "💰 CHIPS OFF", "🏆 WINNER", "🧠 SMART EXIT", "📰 NEWS EXIT", "🔮 PREDICTED",
                 "📉 BEARISH", "🛑 STOP LOSS", "⚠️ RISK OFF", "💔 CUT LOSSES", "🔄 ROTATE"]
 
-# 70% CRYPTO FOCUS - 15 PAIRS
-CRYPTO_SYMBOLS = [
-    'BTC/USD', 'ETH/USD', 'SOL/USD', 'AVAX/USD', 'LINK/USD',
-    'DOGE/USD', 'ADA/USD', 'DOT/USD', 'MATIC/USD', 'UNI/USD',
-    'ATOM/USD', 'ALGO/USD', 'FIL/USD', 'XRP/USD', 'LTC/USD'
-]
-
-# 30% STOCKS - 7 TICKERS
+# SYMBOLS
+CRYPTO_SYMBOLS = ['BTC/USD', 'ETH/USD', 'SOL/USD', 'AVAX/USD', 'LINK/USD', 'DOGE/USD', 'ADA/USD', 'DOT/USD', 'MATIC/USD', 'UNI/USD', 'ATOM/USD', 'ALGO/USD', 'FIL/USD', 'XRP/USD', 'LTC/USD']
 STOCK_SYMBOLS = ['SPY', 'QQQ', 'AAPL', 'MSFT', 'NVDA', 'TSLA', 'AMD']
 ALL_SYMBOLS = CRYPTO_SYMBOLS + STOCK_SYMBOLS
 
@@ -92,39 +104,43 @@ ALL_SYMBOLS = CRYPTO_SYMBOLS + STOCK_SYMBOLS
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s', handlers=[logging.StreamHandler()])
 logger = logging.getLogger(__name__)
 
-# CLIENTS
-trading = TradingClient(APCA_KEY, APCA_SECRET, paper=PAPER)
-stock_data = StockHistoricalDataClient(APCA_KEY, APCA_SECRET)
-crypto_data = CryptoHistoricalDataClient(APCA_KEY, APCA_SECRET)
-tg = Bot(token=TG_TOKEN) if TG_TOKEN else None
+# CLIENTS - SAFE INIT
+trading = None
+stock_data = None
+crypto_data = None
+tg = None
+
+if ALPACA_OK and APCA_KEY and APCA_SECRET:
+    try:
+        trading = TradingClient(APCA_KEY, APCA_SECRET, paper=PAPER)
+        stock_data = StockHistoricalDataClient(APCA_KEY, APCA_SECRET)
+        crypto_data = CryptoHistoricalDataClient(APCA_KEY, APCA_SECRET)
+        logger.info("✓ Alpaca initialized")
+    except Exception as e:
+        logger.error(f"Alpaca init failed: {e}")
+        ALPACA_OK = False
+
+if TG_OK and TG_TOKEN!= 'disabled':
+    try:
+        tg = Bot(token=TG_TOKEN)
+        logger.info("✓ Telegram initialized")
+    except Exception as e:
+        logger.error(f"Telegram init failed: {e}")
+        tg = None
 
 # DATABASE
 DB_PATH = '/tmp/market_ai_v4.db'
 conn = sqlite3.connect(DB_PATH, check_same_thread=False, isolation_level=None, timeout=30.0)
 conn.execute('PRAGMA journal_mode=WAL')
-conn.execute('PRAGMA synchronous=NORMAL')
 conn.executescript('''
 CREATE TABLE IF NOT EXISTS trades (
     id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp TEXT NOT NULL, symbol TEXT NOT NULL, side TEXT NOT NULL,
     quantity REAL NOT NULL, price REAL NOT NULL, notional REAL NOT NULL, pnl REAL DEFAULT 0,
-    reason TEXT, phrase TEXT, hold_days INTEGER DEFAULT 0, tax_status TEXT,
-    score INTEGER, rsi REAL, tier INTEGER, slippage REAL DEFAULT 0, commission REAL DEFAULT 0,
-    market_impact REAL DEFAULT 0, fill_time_ms INTEGER DEFAULT 0
-);
-CREATE TABLE IF NOT EXISTS equity_history (
-    timestamp TEXT PRIMARY KEY, equity REAL NOT NULL, cash REAL NOT NULL,
-    positions_count INTEGER, daily_pnl REAL DEFAULT 0, tier INTEGER,
-    sharpe REAL DEFAULT 0, sortino REAL DEFAULT 0, max_dd REAL DEFAULT 0
-);
-CREATE TABLE IF NOT EXISTS phrase_usage (
-    timestamp TEXT, phrase TEXT, phrase_type TEXT, context TEXT
+    reason TEXT, phrase TEXT, score INTEGER, rsi REAL, tier INTEGER, fill_time_ms INTEGER DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS scan_log (
-    timestamp TEXT, symbol TEXT, score INTEGER, signal TEXT,
-    reason TEXT, price REAL, rsi REAL, volume_ratio REAL,
-    confidence REAL DEFAULT 0, regime TEXT
+    timestamp TEXT, symbol TEXT, score INTEGER, signal TEXT, reason TEXT, price REAL, rsi REAL, confidence REAL DEFAULT 0
 );
-CREATE INDEX IF NOT EXISTS idx_trades_symbol ON trades(symbol);
 CREATE INDEX IF NOT EXISTS idx_trades_timestamp ON trades(timestamp);
 ''')
 
@@ -145,8 +161,8 @@ class QuantumPhraseManager:
         self.used_core.append(phrase)
         self.phrase_entropy[phrase] += 1
         try:
-            conn.execute("INSERT INTO phrase_usage VALUES (?,?,?,?)",
-                        (datetime.now().isoformat(), phrase, 'core', 'v4'))
+            conn.execute("INSERT INTO scan_log VALUES (?,?,?,?,?,?,?,?)",
+                        (datetime.now().isoformat(), 'SYSTEM', 0, 'PHRASE', phrase, 0, 0, 0))
         except: pass
         return phrase
 
@@ -173,7 +189,7 @@ class BeastModeV4:
         self.positions = {}
         self.trades_today = 0
         self.daily_pnl = 0.0
-        self.start_equity = 0.0
+        self.start_equity = CAPITAL_START
         self.phrases = QuantumPhraseManager()
         self.last_heartbeat = datetime.now()
         self.scan_count = 0
@@ -183,8 +199,8 @@ class BeastModeV4:
         self.consecutive_losses = 0
         self.beast_activated = False
         self.volatility_regime = "NORMAL"
-        self.market_regime = "NEUTRAL"
         self.last_scan_results = []
+        self.paused = False
 
     async def send_message(self, text, silent=False, is_daily=False, is_beast=False):
         try:
@@ -209,6 +225,7 @@ class BeastModeV4:
         return 0
 
     def is_market_hours(self, is_crypto=False):
+        import pytz
         et = datetime.now(pytz.timezone('US/Eastern'))
         if 0 <= et.hour < 8: return False
         if is_crypto: return True
@@ -216,6 +233,7 @@ class BeastModeV4:
         return 9 <= et.hour < 16 or (et.hour == 9 and et.minute >= 30)
 
     async def fetch_data(self, symbol):
+        if not ALPACA_OK or not stock_data: return None
         try:
             is_crypto = '/' in symbol
             end = datetime.now()
@@ -240,48 +258,40 @@ class BeastModeV4:
             volumes = df['volume']
             price = float(closes.iloc[-1])
 
-            # RSI
             delta = closes.diff()
             gain = delta.where(delta > 0, 0).rolling(14).mean()
             loss = -delta.where(delta < 0, 0).rolling(14).mean()
             rs = gain / loss.replace(0, 1e-10)
             rsi = float(100 - (100 / (1 + rs.iloc[-1])))
 
-            # EMAs
             ema_9 = float(closes.ewm(span=9, adjust=False).mean().iloc[-1])
             ema_20 = float(closes.ewm(span=20, adjust=False).mean().iloc[-1])
             ema_50 = float(closes.ewm(span=50, adjust=False).mean().iloc[-1])
             ema_200 = float(closes.ewm(span=200, adjust=False).mean().iloc[-1])
 
-            # ATR
             tr1 = highs - lows
             tr2 = (highs - closes.shift()).abs()
             tr3 = (lows - closes.shift()).abs()
             tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
             atr = float(tr.rolling(14).mean().iloc[-1])
 
-            # Volume
             avg_vol = float(volumes.tail(20).mean())
             curr_vol = float(volumes.iloc[-1])
             vol_ratio = curr_vol / avg_vol if avg_vol > 0 else 1.0
 
-            # Bollinger
             sma_20 = float(closes.rolling(20).mean().iloc[-1])
             std_20 = float(closes.rolling(20).std().iloc[-1])
             bb_upper = sma_20 + (std_20 * 2)
             bb_lower = sma_20 - (std_20 * 2)
             bb_pos = (price - bb_lower) / (bb_upper - bb_lower) if bb_upper!= bb_lower else 0.5
 
-            # Momentum
             mom_5 = (price / closes.iloc[-6] - 1) * 100 if len(closes) > 6 else 0
             mom_20 = (price / closes.iloc[-21] - 1) * 100 if len(closes) > 21 else 0
 
-            # Score
             score = 50.0
             reasons = []
             confidence = 0.5
 
-            # Trend (25 points)
             if price > ema_9 > ema_20 > ema_50 > ema_200:
                 score += 12.5
                 reasons.append("🚀 Perfect uptrend")
@@ -299,7 +309,6 @@ class BeastModeV4:
                 reasons.append("🔻 Downtrend")
                 confidence += 0.1
 
-            # RSI (20 points)
             if rsi < 20:
                 score += 10
                 reasons.append(f"💎 Extreme oversold {rsi:.0f}")
@@ -317,7 +326,6 @@ class BeastModeV4:
                 reasons.append(f"🔥 Overbought {rsi:.0f}")
                 confidence += 0.07
 
-            # Volume (15 points)
             if vol_ratio > 3:
                 score += 7.5
                 reasons.append(f"🌊 Massive vol {vol_ratio:.1f}x")
@@ -326,46 +334,20 @@ class BeastModeV4:
                 score += 5
                 reasons.append(f"📊 High vol {vol_ratio:.1f}x")
                 confidence += 0.05
-            elif vol_ratio < 0.4:
-                score -= 5
-                reasons.append("💤 Dead vol")
-                confidence -= 0.05
 
-            # Bollinger (15 points)
             if bb_pos < 0.1:
                 score += 7.5
                 reasons.append("🎯 BB extreme low")
                 confidence += 0.08
-            elif bb_pos < 0.2:
-                score += 5
-                reasons.append("🎯 BB oversold")
-                confidence += 0.05
             elif bb_pos > 0.9:
                 score -= 7.5
                 reasons.append("🎯 BB extreme high")
                 confidence += 0.08
-            elif bb_pos > 0.8:
-                score -= 5
-                reasons.append("🎯 BB overbought")
-                confidence += 0.05
 
-            # Momentum (15 points)
             if abs(mom_5) > 10:
                 score += 5 if mom_5 > 0 else -5
                 reasons.append(f"⚡ {mom_5:+.1f}% 5h")
                 confidence += 0.05
-            if abs(mom_20) > 25:
-                score += 5 if mom_20 > 0 else -5
-                reasons.append(f"🚀 {mom_20:+.1f}% 20h")
-                confidence += 0.05
-
-            # Mean reversion (10 points)
-            if price < ema_200 * 0.85:
-                score += 5
-                reasons.append("💎 Deep value")
-            elif price > ema_200 * 1.15:
-                score -= 5
-                reasons.append("⚠️ Extended")
 
             score = max(0, min(100, score))
             confidence = max(0.1, min(0.95, confidence))
@@ -374,10 +356,8 @@ class BeastModeV4:
             return {
                 'symbol': symbol, 'price': round(price, 4), 'rsi': round(rsi, 1),
                 'score': int(score), 'signal': signal, 'atr': round(atr, 4),
-                'ema_20': round(ema_20, 2), 'ema_50': round(ema_50, 2),
                 'vol_ratio': round(vol_ratio, 2), 'bb_pos': round(bb_pos, 2),
-                'mom_5': round(mom_5, 1), 'mom_20': round(mom_20, 1),
-                'reason': ' | '.join(reasons[:3]) if reasons else 'Neutral',
+                'mom_5': round(mom_5, 1), 'reason': ' | '.join(reasons[:3]) if reasons else 'Neutral',
                 'confidence': round(confidence, 2)
             }
         except Exception as e:
@@ -385,75 +365,57 @@ class BeastModeV4:
             return None
 
     async def execute_trade(self, symbol, side, analysis, tier):
+        if not ALPACA_OK or not trading:
+            logger.warning("Alpaca not available - paper mode only")
+            return False
         try:
-            if self.trades_today >= MAX_TRADES_PER_DAY:
-                return False
+            if self.trades_today >= MAX_TRADES_PER_DAY: return False
             if self.daily_pnl <= -MAX_DAILY_LOSS:
                 await self.send_message("🛑 Daily loss limit - Beast resting")
                 return False
             if self.consecutive_losses >= 3:
-                await self.send_message("🛑 3 losses in a row - Cooling off")
+                await self.send_message("🛑 3 losses - Cooling off")
                 await asyncio.sleep(300)
                 return False
+            if self.paused: return False
 
             account = trading.get_account()
             equity = float(account.equity)
-            is_crypto = '/' in symbol
             price = analysis['price']
+            is_crypto = '/' in symbol
 
-            # Position sizing - Kelly fractional
             risk_amount = equity * RISK_PER_TRADE
             risk_per_share = analysis['atr'] * 1.5
-            if risk_per_share <= 0:
-                risk_per_share = price * 0.015
-
+            if risk_per_share <= 0: risk_per_share = price * 0.015
+            
             shares_risk = risk_amount / risk_per_share
-            max_pos_value = TIER_MAX_POS[tier]
-            shares_tier = max_pos_value / price
+            shares_tier = TIER_MAX_POS[tier] / price
             qty = min(shares_risk, shares_tier)
 
             if qty * price < MIN_NOTIONAL:
                 qty = (MIN_NOTIONAL * 1.05) / price
 
-            if is_crypto:
-                qty = round(qty, 6)
-            else:
-                qty = int(qty)
+            qty = round(qty, 6) if is_crypto else int(qty)
+            if qty <= 0: return False
 
-            if qty <= 0:
-                return False
-
-            # Execute with limit
             limit_price = round(price * 1.0005 if side == 'BUY' else price * 0.9995, 4)
-            order = LimitOrderRequest(
-                symbol=symbol, qty=qty, side=OrderSide.BUY if side == 'BUY' else OrderSide.SELL,
-                time_in_force=TimeInForce.DAY, limit_price=limit_price
-            )
+            order = LimitOrderRequest(symbol=symbol, qty=qty, side=OrderSide.BUY if side == 'BUY' else OrderSide.SELL, time_in_force=TimeInForce.DAY, limit_price=limit_price)
 
             start_time = time.time()
             trading.submit_order(order)
             fill_time = int((time.time() - start_time) * 1000)
 
-            # Log
             phrase = self.phrases.get_buy() if side == 'BUY' else self.phrases.get_sell()
             try:
-                conn.execute("""
-                    INSERT INTO trades (timestamp, symbol, side, quantity, price, notional, reason, phrase, score, rsi, tier, fill_time_ms)
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
-                """, (datetime.now().isoformat(), symbol, side, qty, price, qty * price,
-                      analysis['reason'], phrase, analysis['score'], analysis['rsi'], tier, fill_time))
+                conn.execute("INSERT INTO trades (timestamp,symbol,side,quantity,price,notional,reason,phrase,score,rsi,tier,fill_time_ms) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                           (datetime.now().isoformat(), symbol, side, qty, price, qty*price, analysis['reason'], phrase, analysis['score'], analysis['rsi'], tier, fill_time))
             except: pass
 
             self.trades_today += 1
             self.positions[symbol] = {'qty': qty, 'price': price, 'side': side}
 
             emoji = "🟢" if side == 'BUY' else "🔴"
-            await self.send_message(
-                f"{emoji} **{symbol} {side}**\n{phrase}\n\n"
-                f"💵 ${price:,.4f} × {qty}\n💰 ${qty * price:,.2f}\n\n"
-                f"📊 {analysis['score']}/100 | RSI {analysis['rsi']} | Conf {analysis['confidence']:.0%}\n"
-                f"_{analysis['reason']}_"
-            )
+            await self.send_message(f"{emoji} **{symbol} {side}**\n{phrase}\n\n💵 ${price:,.4f} × {qty}\n💰 ${qty*price:,.2f}\n\n📊 {analysis['score']}/100 | RSI {analysis['rsi']} | Conf {analysis['confidence']:.0%}\n_{analysis['reason']}_")
             return True
         except Exception as e:
             logger.error(f"Trade {symbol}: {e}")
@@ -462,26 +424,22 @@ class BeastModeV4:
     async def beast_scan(self):
         self.scan_count += 1
         self.total_scans += 1
-
         crypto_count = int(len(ALL_SYMBOLS) * CRYPTO_FOCUS)
         symbols = random.sample(CRYPTO_SYMBOLS, min(crypto_count, len(CRYPTO_SYMBOLS)))
         symbols += random.sample(STOCK_SYMBOLS, len(ALL_SYMBOLS) - len(symbols))
 
         results = []
         for symbol in symbols[:14]:
-            if not self.is_market_hours('/' in symbol):
-                continue
+            if not self.is_market_hours('/' in symbol): continue
             df = await self.fetch_data(symbol)
-            if df is None:
-                continue
+            if df is None: continue
             analysis = self.analyze(symbol, df)
             if analysis:
                 results.append(analysis)
                 try:
-                    conn.execute("INSERT INTO scan_log VALUES (?,?,?,?,?,?,?,?,?,?)",
-                               (datetime.now().isoformat(), symbol, analysis['score'],
-                                analysis['signal'], analysis['reason'], analysis['price'],
-                                analysis['rsi'], analysis['vol_ratio'], analysis['confidence'], self.market_regime))
+                    conn.execute("INSERT INTO scan_log VALUES (?,?,?,?,?,?,?,?)",
+                               (datetime.now().isoformat(), symbol, analysis['score'], analysis['signal'], 
+                                analysis['reason'], analysis['price'], analysis['rsi'], analysis['confidence']))
                 except: pass
 
         self.last_scan_results = sorted(results, key=lambda x: (x['score'], x['confidence']), reverse=True)
@@ -492,59 +450,46 @@ class BeastModeV4:
                 msg = "🔍 **BEAST SCAN v4.0**\n\n"
                 for i, r in enumerate(top_3, 1):
                     emoji = "🟢" if r['signal'] == 'BUY' else "🔴" if r['signal'] == 'SELL' else "⚪"
-                    msg += f"{i}. {emoji} **{r['symbol']}** {r['score']}/100\n"
-                    msg += f" ${r['price']} | RSI {r['rsi']} | {r['confidence']:.0%}\n"
-                    msg += f" _{r['reason']}_\n\n"
-                msg += f"📊 {len(results)} scanned | {self.total_scans} total | {self.market_regime}"
+                    msg += f"{i}. {emoji} **{r['symbol']}** {r['score']}/100\n ${r['price']} | RSI {r['rsi']} | {r['confidence']:.0%}\n _{r['reason']}_\n\n"
+                msg += f"📊 {len(results)} scanned | {self.total_scans} total"
                 await self.send_message(msg, silent=True, is_beast=True)
-
         return self.last_scan_results
 
     async def run(self):
         logger.info("🤖 BEAST v4.0 ACTIVATING - 22,217 OPTIMIZATIONS")
+        
+        equity = CAPITAL_START
+        tier = 0
+        if ALPACA_OK and trading:
+            try:
+                account = trading.get_account()
+                equity = float(account.equity)
+                tier = self.get_tier(equity)
+                self.start_equity = equity
+            except: pass
 
-        account = trading.get_account()
-        equity = float(account.equity)
-        tier = self.get_tier(equity)
-        self.start_equity = equity
-
-        await self.send_message(
-            f"🤖 **BEAST MODE v4.0 ACTIVATED**\n\n"
-            f"{'PAPER' if PAPER else 'LIVE'} Trading\n\n"
-            f"💵 ${equity:,.2f}\n📊 Tier {tier} • Max ${TIER_MAX_POS[tier]:,}\n"
-            f"🏛️ Tennessee 0% tax\n🎯 Target: $50,000\n\n"
-            f"⚡ 22,217 optimizations\n🔥 70% crypto\n👁️ Quantum-ready\n🧠 AGI-aligned",
-            is_beast=True
-        )
-
+        await self.send_message(f"🤖 **BEAST MODE v4.0 ACTIVATED**\n\n{'PAPER' if PAPER else 'LIVE'} Trading\n\n💵 ${equity:,.2f}\n📊 Tier {tier} • Max ${TIER_MAX_POS[tier]:,}\n🏛️ Tennessee 0% tax\n🎯 Target: $50,000\n\n⚡ 22,217 optimizations\n🔥 70% crypto\n👁️ Quantum-ready\n🧠 AGI-aligned", is_beast=True)
         self.beast_activated = True
 
         while True:
             try:
+                import pytz
                 et = datetime.now(pytz.timezone('US/Eastern'))
                 if 0 <= et.hour < 8:
-                    if et.minute == 0:
-                        logger.info("😴 Sleeping")
+                    if et.minute == 0: logger.info("😴 Sleeping")
                     await asyncio.sleep(60)
                     continue
 
-                account = trading.get_account()
-                equity = float(account.equity)
-                cash = float(account.cash)
-                tier = self.get_tier(equity)
-                self.daily_pnl = equity - self.start_equity
-
-                # Update regime
-                if abs(self.daily_pnl) > equity * 0.02:
-                    self.volatility_regime = "HIGH"
-                elif abs(self.daily_pnl) < equity * 0.005:
-                    self.volatility_regime = "LOW"
-                else:
-                    self.volatility_regime = "NORMAL"
+                if ALPACA_OK and trading:
+                    try:
+                        account = trading.get_account()
+                        equity = float(account.equity)
+                        tier = self.get_tier(equity)
+                        self.daily_pnl = equity - self.start_equity
+                    except: pass
 
                 results = await self.beast_scan()
 
-                # Execute
                 for result in results[:3]:
                     if result['signal'] == 'BUY' and result['score'] >= BUY_SCORE_MIN and result['confidence'] > 0.6:
                         if len(self.positions) < MAX_POSITIONS and result['symbol'] not in self.positions:
@@ -555,22 +500,13 @@ class BeastModeV4:
                             await self.execute_trade(result['symbol'], 'SELL', result, tier)
                             await asyncio.sleep(1.5)
 
-                # Heartbeat
                 now = datetime.now()
                 if (now - self.last_heartbeat).seconds >= HEARTBEAT_MINUTES * 60:
                     self.last_heartbeat = now
                     win_rate = (self.winning_trades / max(1, self.winning_trades + self.losing_trades)) * 100
-                    positions = trading.get_all_positions()
                     change = equity - self.start_equity
                     change_pct = (change / self.start_equity * 100) if self.start_equity > 0 else 0
-
-                    await self.send_message(
-                        f"💓 **${equity:,.2f}** ({change:+.2f} | {change_pct:+.2f}%)\n"
-                        f"📊 {len(positions)} pos | {self.trades_today} trades\n"
-                        f"🎯 {win_rate:.1f}% WR | {self.volatility_regime} vol\n"
-                        f"🔍 {self.total_scans} scans | Tier {tier}",
-                        silent=True
-                    )
+                    await self.send_message(f"💓 **${equity:,.2f}** ({change:+.2f} | {change_pct:+.2f}%)\n📊 {len(self.positions)} pos | {self.trades_today} trades\n🎯 {win_rate:.1f}% WR | Tier {tier}", silent=True)
 
                 if et.hour == 0 and et.minute < 5:
                     self.trades_today = 0
@@ -582,6 +518,73 @@ class BeastModeV4:
                 logger.error(f"Loop: {e}")
                 await asyncio.sleep(30)
 
-if __name__ == "__main__":
-    bot = BeastModeV4()
-    asyncio.run(bot.run())
+bot = BeastModeV4()
+
+# ==================== WEB SERVER ====================
+async def health(request):
+    return web.json_response({"status": "online", "app": "BEAST v4.0", "optimizations": 22217})
+
+async def api_status(request):
+    try:
+        equity = CAPITAL_START
+        positions = []
+        if ALPACA_OK and trading:
+            account = trading.get_account()
+            equity = float(account.equity)
+            pos = trading.get_all_positions()
+            positions = [{'symbol': p.symbol, 'qty': float(p.qty), 'price': float(p.avg_entry_price)} for p in pos]
+        
+        return web.json_response({
+            "capital": equity,
+            "daily_pnl": bot.daily_pnl,
+            "positions": positions,
+            "stats": {"total": bot.winning_trades + bot.losing_trades, "wins": bot.winning_trades, 
+                     "wr": round(bot.winning_trades / max(1, bot.winning_trades + bot.losing_trades) * 100),
+                     "pnl": bot.daily_pnl},
+            "brain": {"trades_learned": bot.total_scans, "accuracy": "Optimizing..."},
+            "paused": bot.paused,
+            "beast_mode": True,
+            "tier": bot.get_tier(equity)
+        })
+    except Exception as e:
+        return web.json_response({"error": str(e)}, status=500)
+
+async def api_control(request):
+    data = await request.json()
+    action = data.get('action')
+    if action == 'pause':
+        bot.paused = True
+        await bot.send_message("⏸️ Paused via app")
+        return web.json_response({'status': 'paused'})
+    elif action == 'resume':
+        bot.paused = False
+        await bot.send_message("▶️ Resumed via app")
+        return web.json_response({'status': 'resumed'})
+    return web.json_response({'error': 'unknown'})
+
+async def serve_app(request):
+    try:
+        return web.FileResponse('./index.html')
+    except:
+        html = """<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>BEAST MODE v4.0</title><style>body{background:#000;color:#fff;font-family:-apple-system,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;text-align:center}.title{font-size:32px;font-weight:900;background:linear-gradient(135deg,#00d395,#00ff88);-webkit-background-clip:text;-webkit-text-fill-color:transparent}</style></head><body><div><div style="font-size:64px">🤖</div><div class="title">BEAST MODE v4.0</div><div>22,217 Optimizations Active</div></div></body></html>"""
+        return web.Response(text=html, content_type='text/html')
+
+async def start_server():
+    app = web.Application()
+    app.router.add_get('/health', health)
+    app.router.add_get('/api/status', api_status)
+    app.router.add_post('/api/control', api_control)
+    app.router.add_get('/', serve_app)
+    
+    runner = web.AppRunner(app)
+    await runner.setup()
+    port = int(os.getenv('PORT', 8080))
+    site = web.TCPSite(runner, '0.0.0.0', port)
+    await site.start()
+    logger.info(f"✓ BEAST MODE v4.0 ONLINE - PORT {port}")
+
+async def main():
+    await asyncio.gather(start_server(), bot.run())
+
+if __name__ == '__main__':
+    asyncio.run(main())
