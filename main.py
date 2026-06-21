@@ -686,4 +686,118 @@ class BeastEngine:
                 now = datetime.now()
                 if (now - self.last_heartbeat).seconds >= CONFIG['heartbeat_minutes'] * 60:
                     self.last_heartbeat = now
-                    win_rate = (self.winning_trades / max(1, self.winning_trades + self.losing_tr
+                    win_rate = (self.winning_trades / max(1, self.winning_trades + self.losing_tr                     positions = trading.get_all_positions()
+                    change = equity - self.start_equity
+                    change_pct = (change / self.start_equity * 100) if self.start_equity > 0 else 0
+                    await self.send_telegram(f"💓 **${equity:,.2f}** ({change:+.2f} | {change_pct:+.2f}%)\n📊 {len(positions)} pos | {self.trades_today} trades\n🎯 {win_rate:.1f}% WR | {self.volatility_regime} vol\n🔍 {self.total_scans} scans | Tier {tier}", silent=True)
+                    await self.broadcast({'type': 'portfolio', 'data': {'equity': equity, 'cash': cash, 'daily_pnl': self.daily_pnl, 'positions': len(positions), 'win_rate': win_rate}})
+                
+                if et.hour == 0 and et.minute < 5:
+                    self.trades_today = 0
+                    self.start_equity = equity
+                    self.scan_count = 0
+                
+                await asyncio.sleep(CONFIG['scan_interval'])
+            except Exception as e:
+                logger.error(f"Loop: {e}")
+                await asyncio.sleep(30)
+
+engine = BeastEngine()
+
+async def health(request):
+    return web.json_response({'status': 'online', 'version': '5.1.0', 'optimizations': 700})
+
+async def api_portfolio(request):
+    account = trading.get_account()
+    equity = float(account.equity)
+    cash = float(account.cash)
+    positions = trading.get_all_positions()
+    win_rate = (engine.winning_trades / max(1, engine.winning_trades + engine.losing_trades)) * 100
+    return web.json_response({
+        'equity': equity, 'cash': cash, 'daily_pnl': engine.daily_pnl,
+        'daily_pnl_pct': (engine.daily_pnl / engine.start_equity * 100) if engine.start_equity > 0 else 0,
+        'positions': [{'symbol': p.symbol, 'qty': float(p.qty), 'price': float(p.avg_entry_price), 
+                      'market_value': float(p.market_value), 'unrealized_pl': float(p.unrealized_pl), 
+                      'unrealized_plpc': float(p.unrealized_plpc) * 100} for p in positions],
+        'win_rate': win_rate, 'tier': engine.get_tier(equity)
+    })
+
+async def api_chart(request):
+    symbol = request.query.get('symbol', 'BTC/USD')
+    tf = request.query.get('timeframe', '1h')
+    df = await engine.fetch_data(symbol, tf)
+    if df is None:
+        return web.json_response({'symbol': symbol, 'candles': []})
+    candles = []
+    for _, row in df.iterrows():
+        candles.append({
+            'time': int(row['timestamp'].timestamp()),
+            'open': float(row['open']), 'high': float(row['high']),
+            'low': float(row['low']), 'close': float(row['close'])
+        })
+    return web.json_response({'symbol': symbol, 'candles': candles[-100:]})
+
+async def api_trade(request):
+    data = await request.json()
+    symbol = data.get('symbol')
+    side = data.get('side')
+    amount = float(data.get('amount', 0))
+    df = await engine.fetch_data(symbol)
+    if df is None:
+        return web.json_response({'success': False, 'error': 'No data'})
+    analysis = engine.analyze(symbol, df)
+    tier = engine.get_tier(float(trading.get_account().equity))
+    success = await engine.execute_trade(symbol, side, analysis, tier)
+    return web.json_response({'success': success})
+
+async def api_emergency_stop(request):
+    engine.emergency_stop = True
+    positions = trading.get_all_positions()
+    for p in positions:
+        try:
+            trading.close_position(p.symbol)
+        except: pass
+    await engine.send_telegram("🛑 **EMERGENCY STOP ACTIVATED**\n\nAll positions closed. Bot paused.")
+    return web.json_response({'success': True})
+
+async def websocket_handler(request):
+    ws = web.WebSocketResponse()
+    await ws.prepare(request)
+    engine.ws_clients.add(ws)
+    try:
+        async for msg in ws:
+            if msg.type == WSMsgType.TEXT:
+                data = json.loads(msg.data)
+                if data.get('type') == 'subscribe':
+                    logger.info(f"WS subscribed: {data.get('symbol')}")
+    except:
+        pass
+    finally:
+        engine.ws_clients.discard(ws)
+    return ws
+
+async def serve_static(request):
+    return web.FileResponse('index.html')
+
+def create_app():
+    app = web.Application()
+    app.router.add_get('/health', health)
+    app.router.add_get('/api/portfolio', api_portfolio)
+    app.router.add_get('/api/chart', api_chart)
+    app.router.add_post('/api/trade', api_trade)
+    app.router.add_post('/api/emergency-stop', api_emergency_stop)
+    app.router.add_get('/ws', websocket_handler)
+    app.router.add_get('/', serve_static)
+    return app
+
+async def main():
+    app = create_app()
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, '0.0.0.0', PORT)
+    await site.start()
+    logger.info(f"🌐 Server started on port {PORT}")
+    await engine.run()
+
+if __name__ == '__main__':
+    asyncio.run(main())
