@@ -910,12 +910,15 @@ class Beast:
                 'cycle': self.cycle
             })
 
-        app.router.add_get('/api/status', api_status)
-        app.router.add_static('/', '.', show_index=True)
-        cors = aiohttp_cors.setup(app, defaults={"*": aiohttp_cors.ResourceOptions(allow_credentials=True, expose_headers="*", allow_headers="*")})
-        for route in list(app.router.routes()):
-            cors.add(route)
+        async def serve_dashboard(request):
+            try:
+                return web.FileResponse('./index.html')
+            except:
+                return web.Response(text="<h1>Beast Mode v7.0</h1><p>Dashboard loading...</p><p><a href='/api/status'>API Status</a></p>", content_type='text/html')
 
+        app.router.add_get('/api/status', api_status)
+        app.router.add_get('/', serve_dashboard)
+        app.router.add_get('/dashboard', serve_dashboard)
         runner = web.AppRunner(app)
         await runner.setup()
         port = int(os.getenv('PORT', 8080))
