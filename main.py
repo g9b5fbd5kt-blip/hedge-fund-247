@@ -715,9 +715,22 @@ async def api_portfolio(request):
     positions = trading.get_all_positions()
     win_rate = (engine.winning_trades / max(1, engine.winning_trades + engine.losing_trades)) * 100
     return web.json_response({
-        'equity': equity, 'cash': cash, 'daily_pnl': engine.daily_pnl,
+        'equity': equity,
+        'cash': cash,
+        'daily_pnl': engine.daily_pnl,
         'daily_pnl_pct': (engine.daily_pnl / engine.start_equity * 100) if engine.start_equity > 0 else 0,
-        'positions': [{'symbol': p.symbol, 'qty': float(p.qty), 'price': float(p.avg_entry_price),
-                      'market_value': float(p.market_value), 'unrealized_pl': float(p.unrealized_pl),
-                      'unrealized_plpc': float(p.unrealized_plpc) * 100} for p in positions],
-        'win_rate': win_rate, 'tier': engine.get_tier
+        'positions': [
+            {
+                'symbol': p.symbol,
+                'qty': float(p.qty),
+                'price': float(p.avg_entry_price),
+                'market_value': float(p.market_value),
+                'unrealized_pl': float(p.unrealized_pl),
+                'unrealized_plpc': float(p.unrealized_plpc) * 100
+            } for p in positions
+        ],
+        'win_rate': win_rate,
+        'tier': engine.get_tier(equity)
+    })
+
+async def api_chart(request):
