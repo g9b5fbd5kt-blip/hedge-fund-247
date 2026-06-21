@@ -897,7 +897,51 @@ class Beast:
         # Start web server
         app = web.Application()
         async def api_status(request):
-            return web.json_response({
+                    async def api_control(request):
+            data = await request.json()
+            action = data.get('action')
+
+            if action == 'pause':
+                config.PAUSED = True
+                await tg.send("⏸️ Trading PAUSED from dashboard", 'general')
+                return web.json_response({'status': 'paused'})
+
+            elif action == 'resume':
+                config.PAUSED = False
+                await tg.send("▶️ Trading RESUMED from dashboard", 'general')
+                return web.json_response({'status': 'resumed'})
+
+            elif action == 'close_all':
+                positions = db.get_open_trades()
+                for pos in positions:
+                    # Close logic here
+                    pass
+                await tg.send(f"🚨 CLOSED {len(positions)} positions from dashboard", 'general')
+                return web.json_response({'closed': len(positions)})
+
+            elif action == 'set_risk':
+                level = data.get('level', 1)
+                config.RISK_PER_TRADE = 0.01 * level
+                return web.json_response({'risk': config.RISK_PER_TRADE})
+
+            return web.json_response({'error': 'unknown action'})
+
+        async def api_positions(request):
+            positions = db.get_open_trades()
+            trades = []
+            # Get recent trades from DB
+            conn = sqlite3.connect('beast.db')
+            c = conn.cursor()
+            c.execute('SELECT * FROM trades ORDER BY timestamp DESC LIMIT 20')
+            for row in c.fetchall():
+                trades.append({
+                    'symbol': row[1],
+                    'side': row[2],
+                    'pnl': row[7],
+                    'time': row[9]
+                })
+            conn.close()
+            return web.json_response({'positions': positions, 'trades': trades})return web.json_response({
                 'capital': config.CAPITAL,
                 'daily_pnl': risk.daily_pnl,
                 'positions': db.get_open_trades(),
