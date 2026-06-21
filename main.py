@@ -718,7 +718,9 @@ async def api_portfolio(request):
         'equity': equity, 'cash': cash, 'daily_pnl': engine.daily_pnl,
         'daily_pnl_pct': (engine.daily_pnl / engine.start_equity * 100) if engine.start_equity > 0 else 0,
         'positions': [{'symbol': p.symbol, 'qty': float(p.qty), 'price': float(p.avg_entry_price),
-                      'market                       'market_value': float(p.market_value), 'unrealized_pl': float(p.unrealized_pl),
+                      'market_value': float(p.market_value), 'unrealized_pl': float(p.unrealized_pl),
+                      'unrealized_plpc': float(p.unrealized_plpc) * 100} for p in positions],
+        'win                       'market_value': float(p.market_value), 'unrealized_pl': float(p.unrealized_pl),
                       'unrealized_plpc': float(p.unrealized_plpc) * 100} for p in positions],
         'win_rate': win_rate, 'tier': engine.get_tier(equity)
     })
