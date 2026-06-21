@@ -310,7 +310,7 @@ class BeastEngine:
         if cache_key in self.data_cache:
             if time.time() - self.cache_timestamps[cache_key] < CONFIG['cache_ttl']:
                 return self.data_cache[cache_key]
-        
+
         try:
             if not ALPACA_OK:
                 return self.generate_demo_data(symbol)
@@ -318,7 +318,7 @@ class BeastEngine:
             end = datetime.now()
             start = end - timedelta(days=30)
             tf = TimeFrame.Minute if timeframe == '1m' else TimeFrame.Hour
-            
+
             if is_crypto and crypto_data:
                 req = CryptoBarsRequest(symbol_or_symbols=symbol, timeframe=tf, start=start, end=end)
                 bars = crypto_data.get_crypto_bars(req)
@@ -327,11 +327,11 @@ class BeastEngine:
                 bars = stock_data.get_stock_bars(req)
             else:
                 return self.generate_demo_data(symbol)
-            
+
             df = bars.df.reset_index()
             if len(df) < 50:
                 return None
-            
+
             self.data_cache[cache_key] = df
             self.cache_timestamps[cache_key] = time.time()
             return df
@@ -370,50 +370,50 @@ class BeastEngine:
             lows = df['low']
             volumes = df['volume']
             price = float(closes.iloc[-1])
-            
+
             if len(df) > 1:
                 spread = (highs.iloc[-1] - lows.iloc[-1]) / price
                 if spread > CONFIG['spread_limit']:
                     return None
-            
+
             avg_volume_24h = volumes.tail(24).mean() * price
             if avg_volume_24h < CONFIG['min_volume_24h']:
                 return None
-            
+
             delta = closes.diff()
             gain = delta.where(delta > 0, 0).rolling(14).mean()
             loss = -delta.where(delta < 0, 0).rolling(14).mean()
             rs = gain / loss.replace(0, 1e-10)
             rsi = float(100 - (100 / (1 + rs.iloc[-1])))
-            
+
             ema_9 = float(closes.ewm(span=9, adjust=False).mean().iloc[-1])
             ema_20 = float(closes.ewm(span=20, adjust=False).mean().iloc[-1])
             ema_50 = float(closes.ewm(span=50, adjust=False).mean().iloc[-1])
             ema_200 = float(closes.ewm(span=200, adjust=False).mean().iloc[-1])
-            
+
             tr1 = highs - lows
             tr2 = (highs - closes.shift()).abs()
             tr3 = (lows - closes.shift()).abs()
             tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
             atr = float(tr.rolling(14).mean().iloc[-1])
-            
+
             avg_vol = float(volumes.tail(20).mean())
             curr_vol = float(volumes.iloc[-1])
             vol_ratio = curr_vol / avg_vol if avg_vol > 0 else 1.0
-            
+
             sma_20 = float(closes.rolling(20).mean().iloc[-1])
             std_20 = float(closes.rolling(20).std().iloc[-1])
             bb_upper = sma_20 + (std_20 * 2)
             bb_lower = sma_20 - (std_20 * 2)
             bb_pos = (price - bb_lower) / (bb_upper - bb_lower) if bb_upper!= bb_lower else 0.5
-            
+
             mom_5 = (price / closes.iloc[-6] - 1) * 100 if len(closes) > 6 else 0
             mom_20 = (price / closes.iloc[-21] - 1) * 100 if len(closes) > 21 else 0
-            
+
             score = 50.0
             reasons = []
             confidence = 0.5
-            
+
             if price > ema_9 > ema_20 > ema_50 > ema_200:
                 score += 12.5
                 reasons.append("Perfect uptrend")
@@ -430,7 +430,7 @@ class BeastEngine:
                 score -= 8
                 reasons.append("Downtrend")
                 confidence += 0.1
-            
+
             if rsi < 20:
                 score += 10
                 reasons.append(f"Extreme oversold {rsi:.0f}")
@@ -447,7 +447,7 @@ class BeastEngine:
                 score -= 7
                 reasons.append(f"Overbought {rsi:.0f}")
                 confidence += 0.07
-            
+
             if vol_ratio > 3:
                 score += 7.5
                 reasons.append(f"Massive vol {vol_ratio:.1f}x")
@@ -460,7 +460,7 @@ class BeastEngine:
                 score -= 5
                 reasons.append("Dead vol")
                 confidence -= 0.05
-            
+
             if bb_pos < 0.1:
                 score += 7.5
                 reasons.append("BB extreme low")
@@ -477,7 +477,7 @@ class BeastEngine:
                 score -= 5
                 reasons.append("BB overbought")
                 confidence += 0.05
-            
+
             if abs(mom_5) > 10:
                 score += 5 if mom_5 > 0 else -5
                 reasons.append(f"{mom_5:+.1f}% 5h")
@@ -486,24 +486,24 @@ class BeastEngine:
                 score += 5 if mom_20 > 0 else -5
                 reasons.append(f"{mom_20:+.1f}% 20h")
                 confidence += 0.05
-            
+
             if price < ema_200 * 0.85:
                 score += 5
                 reasons.append("Deep value")
             elif price > ema_200 * 1.15:
                 score -= 5
                 reasons.append("Extended")
-            
+
             score = max(0, min(100, score))
             confidence = max(0.1, min(0.95, confidence))
             signal = 'BUY' if score >= CONFIG['buy_score_min'] else 'SELL' if score <= CONFIG['sell_score_max'] else 'HOLD'
-            
+
             win_rate = self.winning_trades / max(1, self.winning_trades + self.losing_trades)
             avg_win = self.total_profit / max(1, self.winning_trades)
             avg_loss = abs(self.total_loss) / max(1, self.losing_trades)
             win_loss_ratio = avg_win / avg_loss if avg_loss > 0 else 2.0
             kelly_size = self.calculate_kelly_size(win_rate, win_loss_ratio, self.start_equity)
-            
+
             return {
                 'symbol': symbol, 'price': round(price, 4), 'rsi': round(rsi, 1),
                 'score': int(score), 'signal': signal, 'atr': round(atr, 4),
@@ -545,55 +545,55 @@ class BeastEngine:
             if not self.check_correlation(symbol):
                 logger.warning(f"{symbol} too correlated with existing positions")
                 return False
-            
+
             account = trading.get_account()
             equity = float(account.equity)
             is_crypto = '/' in symbol
             price = analysis['price']
-            
+
             kelly_amount = analysis['kelly_size']
             risk_amount = equity * CONFIG['risk_per_trade']
             position_amount = min(kelly_amount, risk_amount)
-            
+
             risk_per_share = analysis['atr'] * 1.5
             if risk_per_share <= 0:
                 risk_per_share = price * 0.015
-            
+
             qty = position_amount / risk_per_share
-            max_pos_value = CONFIG['tier_max_pos'][tier]
+            max_pos_value = CONFIG['tier_max_pos']
             shares_tier = max_pos_value / price
             qty = min(qty, shares_tier)
-            
+
             if qty * price < CONFIG['min_notional']:
                 qty = (CONFIG['min_notional'] * 1.05) / price
-            
+
             if is_crypto:
                 qty = round(qty, 6)
             else:
                 qty = int(qty)
-            
+
             if qty <= 0:
                 return False
-            
+
             limit_price = round(price * 1.0005 if side == 'BUY' else price * 0.9995, 4)
             order = LimitOrderRequest(
                 symbol=symbol, qty=qty, side=OrderSide.BUY if side == 'BUY' else OrderSide.SELL,
                 time_in_force=TimeInForce.DAY, limit_price=limit_price
             )
-            
+
             start_time = time.time()
             trading.submit_order(order)
             fill_time = int((time.time() - start_time) * 1000)
-            
+
             phrase = self.phrases.get_buy() if side == 'BUY' else self.phrases.get_sell()
             try:
-                conn.execute("INSERT INTO trades (timestamp, symbol, side, quantity, price, notional, reason, phrase, score, rsi, tier, fill_time_ms, kelly_size) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)", 
+                conn.execute("INSERT INTO trades (timestamp, symbol, side, quantity, price, notional, reason, phrase, score, rsi, tier, fill_time_ms, kelly_size) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
                            (datetime.now().isoformat(), symbol, side, qty, price, qty * price, analysis['reason'], phrase, analysis['score'], analysis['rsi'], tier, fill_time, analysis['kelly_size']))
             except: pass
-            
+
             self.trades_today += 1
             self.positions[symbol] = {'qty': qty, 'price': price, 'side': side}
-            
+
             emoji = "🟢" if side == 'BUY' else "🔴"
             await self.send_telegram(f"{emoji} **{symbol} {side}**\n{phrase}\n\n💵 ${price:,.4f} × {qty}\n💰 ${qty * price:,.2f}\n\n📊 {analysis['score']}/100 | RSI {analysis['rsi']} | Conf {analysis['confidence']:.0%}\n_{analysis['reason']}_")
             await self.broadcast({'type': 'trade', 'data': {'symbol': symbol, 'side': side, 'price': price, 'qty': qty, 'phrase': phrase}})
@@ -619,14 +619,14 @@ class BeastEngine:
             if analysis:
                 results.append(analysis)
                 try:
-                    conn.execute("INSERT INTO scan_log VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", 
-                               (datetime.now().isoformat(), symbol, analysis['score'], analysis['signal'], 
-                                analysis['reason'], analysis['price'], analysis['rsi'], analysis['vol_ratio'], 
+                    conn.execute("INSERT INTO scan_log VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                               (datetime.now().isoformat(), symbol, analysis['score'], analysis['signal'],
+                                analysis['reason'], analysis['price'], analysis['rsi'], analysis['vol_ratio'],
                                 analysis['confidence'], self.market_regime, analysis['spread'], analysis['liquidity']))
                 except: pass
-        
+
         self.last_scan_results = sorted(results, key=lambda x: (x['score'], x['confidence']), reverse=True)
-        
+
         if self.scan_count % 8 == 0:
             top_3 = self.last_scan_results[:3]
             if top_3:
@@ -638,7 +638,7 @@ class BeastEngine:
                     msg += f" _{r['reason']}_\n\n"
                 msg += f"📊 {len(results)} scanned | {self.total_scans} total | {self.market_regime}"
                 await self.send_telegram(msg, silent=True)
-        
+
         return self.last_scan_results
 
     async def run(self):
@@ -647,8 +647,8 @@ class BeastEngine:
         equity = float(account.equity)
         tier = self.get_tier(equity)
         self.start_equity = equity
-        await self.send_telegram(f"🤖 **BEAST MODE v5.1 ACTIVATED**\n\n{'PAPER' if PAPER else 'LIVE'} Trading\n\n💵 ${equity:,.2f}\n📊 Tier {tier} • Max ${CONFIG['tier_max_pos'][tier]:,}\n🏛️ Tennessee 0% tax\n🎯 Target: $50,000\n\n⚡ 700 iOS optimizations\n🔥 70% crypto\n👁️ Quantum-ready\n🧠 AGI-aligned")
-        
+        await self.send_telegram(f"🤖 **BEAST MODE v5.1 ACTIVATED**\n\n{'PAPER' if PAPER else 'LIVE'} Trading\n\n💵 ${equity:,.2f}\n📊 Tier {tier} • Max ${CONFIG['tier_max_pos']:,}\n🏛️ Tennessee 0% tax\n🎯 Target: $50,000\n\n⚡ 700 iOS optimizations\n🔥 70% crypto\n👁️ Quantum-ready\n🧠 AGI-aligned")
+
         while True:
             try:
                 et = datetime.now(pytz.timezone('US/Eastern'))
@@ -657,22 +657,22 @@ class BeastEngine:
                         logger.info("😴 Sleeping")
                     await asyncio.sleep(60)
                     continue
-                
+
                 account = trading.get_account()
                 equity = float(account.equity)
                 cash = float(account.cash)
                 tier = self.get_tier(equity)
                 self.daily_pnl = equity - self.start_equity
-                
+
                 if abs(self.daily_pnl) > equity * 0.02:
                     self.volatility_regime = "HIGH"
                 elif abs(self.daily_pnl) < equity * 0.005:
                     self.volatility_regime = "LOW"
                 else:
                     self.volatility_regime = "NORMAL"
-                
+
                 results = await self.beast_scan()
-                
+
                 for result in results[:3]:
                     if result['signal'] == 'BUY' and result['score'] >= CONFIG['buy_score_min'] and result['confidence'] > 0.6:
                         if len(self.positions) < CONFIG['max_positions'] and result['symbol'] not in self.positions:
@@ -682,21 +682,22 @@ class BeastEngine:
                         if result['symbol'] in self.positions:
                             await self.execute_trade(result['symbol'], 'SELL', result, tier)
                             await asyncio.sleep(1.5)
-                
+
                 now = datetime.now()
                 if (now - self.last_heartbeat).seconds >= CONFIG['heartbeat_minutes'] * 60:
                     self.last_heartbeat = now
-                    win_rate = (self.winning_trades / max(1, self.winning_trades + self.losing_tr                     positions = trading.get_all_positions()
+                    win_rate = (self.winning_trades / max(1, self.winning_trades + self.losing_trades)) * 100
+                    positions = trading.get_all_positions()
                     change = equity - self.start_equity
                     change_pct = (change / self.start_equity * 100) if self.start_equity > 0 else 0
                     await self.send_telegram(f"💓 **${equity:,.2f}** ({change:+.2f} | {change_pct:+.2f}%)\n📊 {len(positions)} pos | {self.trades_today} trades\n🎯 {win_rate:.1f}% WR | {self.volatility_regime} vol\n🔍 {self.total_scans} scans | Tier {tier}", silent=True)
                     await self.broadcast({'type': 'portfolio', 'data': {'equity': equity, 'cash': cash, 'daily_pnl': self.daily_pnl, 'positions': len(positions), 'win_rate': win_rate}})
-                
+
                 if et.hour == 0 and et.minute < 5:
                     self.trades_today = 0
                     self.start_equity = equity
                     self.scan_count = 0
-                
+
                 await asyncio.sleep(CONFIG['scan_interval'])
             except Exception as e:
                 logger.error(f"Loop: {e}")
@@ -716,8 +717,8 @@ async def api_portfolio(request):
     return web.json_response({
         'equity': equity, 'cash': cash, 'daily_pnl': engine.daily_pnl,
         'daily_pnl_pct': (engine.daily_pnl / engine.start_equity * 100) if engine.start_equity > 0 else 0,
-        'positions': [{'symbol': p.symbol, 'qty': float(p.qty), 'price': float(p.avg_entry_price), 
-                      'market_value': float(p.market_value), 'unrealized_pl': float(p.unrealized_pl), 
+        'positions': [{'symbol': p.symbol, 'qty': float(p.qty), 'price': float(p.avg_entry_price),
+                      'market                       'market_value': float(p.market_value), 'unrealized_pl': float(p.unrealized_pl),
                       'unrealized_plpc': float(p.unrealized_plpc) * 100} for p in positions],
         'win_rate': win_rate, 'tier': engine.get_tier(equity)
     })
