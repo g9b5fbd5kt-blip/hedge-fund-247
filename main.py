@@ -720,9 +720,7 @@ async def api_portfolio(request):
         'positions': [{'symbol': p.symbol, 'qty': float(p.qty), 'price': float(p.avg_entry_price),
                       'market_value': float(p.market_value), 'unrealized_pl': float(p.unrealized_pl),
                       'unrealized_plpc': float(p.unrealized_plpc) * 100} for p in positions],
-        'win                       'market_value': float(p.market_value), 'unrealized_pl': float(p.unrealized_pl),
-                      'unrealized_plpc': float(p.unrealized_plpc) * 100} for p in positions],
-        'win_rate': win_rate, 'tier': engine.get_tier(equity)
+        'win_rate': win_rate, 'tier': engine.get_tier(equity         'win_rate': win_rate, 'tier': engine.get_tier(equity)
     })
 
 async def api_chart(request):
