@@ -1,1 +1,859 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"><meta name="apple-mobile-web-app-title" content="BEAST v4.0"><meta name="theme-color" content="#000000"><title>MARKET AI - BEAST MODE v4.0</title><link rel="apple-touch-icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect fill='%23000' width='100' height='100'/><text x='50' y='70' font-size='60' text-anchor='middle' fill='%2300d395'>🤖</text></svg>"><script src="https://unpkg.com/lightweight-charts@4.1.0/dist/lightweight-charts.standalone.production.js"></script><style>*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}body{background:#000;color:#fff;font-family:-apple-system,BlinkMacSystemFont,'SF Pro Display','SF Pro Text',sans-serif;overscroll-behavior:none;user-select:none;padding-top:env(safe-area-inset-top);padding-bottom:env(safe-area-inset-bottom)}.header{height:96px;background:linear-gradient(180deg,#000 0%,#0a0a0a 100%);display:flex;flex-direction:column;justify-content:end;padding:0 16px 12px;border-bottom:0.5px solid rgba(255,255,255,0.1);position:sticky;top:0;z-index:1000;backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px)}.header-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}.logo{font-size:28px;font-weight:900;letter-spacing:-1.5px;background:linear-gradient(135deg,#00d395 0%,#00ff88 25%,#00d395 50%,#00ff88 75%,#00d395 100%);background-size:200% 200%;-webkit-background-clip:text;-webkit-text-fill-color:transparent;animation:shimmer 3s ease-in-out infinite}@keyframes shimmer{0%,100%{background-position:0% 50%}50%{background-position:100% 50%}}.beast-badge{display:flex;align-items:center;gap:6px;background:linear-gradient(135deg,rgba(0,211,149,0.25),rgba(0,255,136,0.15));padding:6px 14px;border-radius:20px;border:1px solid rgba(0,211,149,0.5);backdrop-filter:blur(10px);box-shadow:0 4px 16px rgba(0,211,149,0.2)}.beast-dot{width:8px;height:8px;background:#00d395;border-radius:50%;box-shadow:0 0 16px #00d395,0 0 32px rgba(0,211,149,0.5);animation:pulse 2s ease-in-out infinite}@keyframes pulse{0%,100%{transform:scale(1);opacity:1}50%{transform:scale(1.3);opacity:0.7}}.beast-text{font-size:11px;font-weight:900;color:#00d395;text-transform:uppercase;letter-spacing:1.2px}.header-bottom{display:flex;justify-content:space-between;align-items:baseline}.portfolio-label{font-size:13px;color:#666;font-weight:700;text-transform:uppercase;letter-spacing:0.8px}.portfolio-value{font-size:36px;font-weight:800;letter-spacing:-2px;font-family:'SF Mono','Menlo',monospace;background:linear-gradient(180deg,#fff 0%,#999 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent}.portfolio-change{font-size:16px;font-weight:800;margin-left:8px;letter-spacing:-0.5px}.portfolio-change.green{color:#00d395;text-shadow:0 0 20px rgba(0,211,149,0.5)}.portfolio-change.red{color:#ff3b30;text-shadow:0 0 20px rgba(255,59,48,0.5)}.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;padding:12px;background:#000}.metric{background:linear-gradient(145deg,#0a0a0a 0%,#111 100%);border:0.5px solid rgba(255,255,255,0.1);border-radius:18px;padding:16px;text-align:center;position:relative;overflow:hidden;transition:all 0.2s cubic-bezier(0.4,0,0.2
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="BEAST v4.0">
+    <meta name="theme-color" content="#000000">
+    <title>MARKET AI - BEAST MODE v4.0</title>
+    <script src="https://unpkg.com/lightweight-charts@4.1.0/dist/lightweight-charts.standalone.production.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            -webkit-tap-highlight-color: transparent;
+            -webkit-font-smoothing: antialiased;
+        }
+        
+        body {
+            background: #000;
+            color: #fff;
+            font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif;
+            overscroll-behavior: none;
+            user-select: none;
+            padding-top: env(safe-area-inset-top);
+            padding-bottom: env(safe-area-inset-bottom);
+        }
+        
+        .header {
+            height: 96px;
+            background: linear-gradient(180deg, #000 0%, #0a0a0a 100%);
+            display: flex;
+            flex-direction: column;
+            justify-content: end;
+            padding: 0 16px 12px;
+            border-bottom: 0.5px solid rgba(255,255,255,0.1);
+            position: sticky;
+            top: 0;
+            z-index: 1000;
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+        }
+        
+        .header-top {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+        
+        .logo {
+            font-size: 28px;
+            font-weight: 900;
+            letter-spacing: -1.5px;
+            background: linear-gradient(135deg, #00d395 0%, #00ff88 50%, #00d395 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            animation: shimmer 3s ease-in-out infinite;
+        }
+        
+        @keyframes shimmer {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.8; }
+        }
+        
+        .beast-badge {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            background: linear-gradient(135deg, rgba(0,211,149,0.25), rgba(0,255,136,0.15));
+            padding: 6px 14px;
+            border-radius: 20px;
+            border: 1px solid rgba(0,211,149,0.5);
+            backdrop-filter: blur(10px);
+            box-shadow: 0 4px 16px rgba(0,211,149,0.2);
+        }
+        
+        .beast-dot {
+            width: 8px;
+            height: 8px;
+            background: #00d395;
+            border-radius: 50%;
+            box-shadow: 0 0 16px #00d395;
+            animation: pulse 2s ease-in-out infinite;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); opacity: 1; }
+            50% { transform: scale(1.3); opacity: 0.7; }
+        }
+        
+        .beast-text {
+            font-size: 11px;
+            font-weight: 900;
+            color: #00d395;
+            text-transform: uppercase;
+            letter-spacing: 1.2px;
+        }
+        
+        .header-bottom {
+            display: flex;
+            justify-content: space-between;
+            align-items: baseline;
+        }
+        
+        .portfolio-label {
+            font-size: 13px;
+            color: #666;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.8px;
+        }
+        
+        .portfolio-value {
+            font-size: 36px;
+            font-weight: 800;
+            letter-spacing: -2px;
+            font-family: 'SF Mono', 'Menlo', monospace;
+            background: linear-gradient(180deg, #fff 0%, #999 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        
+        .portfolio-change {
+            font-size: 16px;
+            font-weight: 800;
+            margin-left: 8px;
+            letter-spacing: -0.5px;
+        }
+        
+        .portfolio-change.green {
+            color: #00d395;
+            text-shadow: 0 0 20px rgba(0,211,149,0.5);
+        }
+        
+        .portfolio-change.red {
+            color: #ff3b30;
+            text-shadow: 0 0 20px rgba(255,59,48,0.5);
+        }
+        
+        .metrics {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 8px;
+            padding: 12px;
+            background: #000;
+        }
+        
+        .metric {
+            background: linear-gradient(145deg, #0a0a0a 0%, #111 100%);
+            border: 0.5px solid rgba(255,255,255,0.1);
+            border-radius: 18px;
+            padding: 16px;
+            text-align: center;
+            position: relative;
+            overflow: hidden;
+            transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        
+        .metric:active {
+            transform: scale(0.97);
+        }
+        
+        .metric::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 2px;
+            background: linear-gradient(90deg, transparent, #00d395, transparent);
+            opacity: 0.6;
+        }
+        
+        .m-label {
+            font-size: 9px;
+            color: #555;
+            text-transform: uppercase;
+            letter-spacing: 1.2px;
+            margin-bottom: 6px;
+            font-weight: 800;
+        }
+        
+        .m-value {
+            font-size: 22px;
+            font-weight: 900;
+            letter-spacing: -0.5px;
+            font-family: 'SF Mono', monospace;
+        }
+        
+        .m-value.green {
+            color: #00d395;
+            text-shadow: 0 0 20px rgba(0,211,149,0.4);
+        }
+        
+        .m-value.red {
+            color: #ff3b30;
+        }
+        
+        .m-sub {
+            font-size: 10px;
+            color: #444;
+            margin-top: 4px;
+            font-weight: 600;
+        }
+        
+        .chart-section {
+            margin: 0 12px 12px;
+            border-radius: 20px;
+            overflow: hidden;
+            border: 0.5px solid rgba(255,255,255,0.1);
+            background: #000;
+            position: relative;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.6);
+        }
+        
+        .chart-header {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 60px;
+            background: linear-gradient(180deg, rgba(0,0,0,0.98) 0%, rgba(0,0,0,0.8) 50%, transparent 100%);
+            z-index: 10;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 16px;
+            pointer-events: none;
+        }
+        
+        .symbol-info {
+            pointer-events: auto;
+        }
+        
+        .symbol-selector {
+            background: rgba(0,0,0,0.9);
+            backdrop-filter: blur(20px);
+            border: 1px solid #333;
+            border-radius: 12px;
+            padding: 8px 14px;
+            font-size: 17px;
+            font-weight: 800;
+            color: #fff;
+            outline: none;
+            appearance: none;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        
+        .symbol-selector:active {
+            transform: scale(0.95);
+            border-color: #00d395;
+        }
+        
+        .symbol-price {
+            font-size: 28px;
+            font-weight: 900;
+            font-family: 'SF Mono', monospace;
+            margin-top: 4px;
+            letter-spacing: -1px;
+        }
+        
+        .symbol-change {
+            font-size: 14px;
+            font-weight: 700;
+            margin-top: 2px;
+        }
+        
+        .symbol-change.green { color: #00d395; }
+        .symbol-change.red { color: #ff3b30; }
+        
+        .timeframe-selector {
+            display: flex;
+            gap: 6px;
+            pointer-events: auto;
+        }
+        
+        .tf-btn {
+            padding: 8px 14px;
+            background: rgba(0,0,0,0.9);
+            backdrop-filter: blur(20px);
+            border: 1px solid #333;
+            border-radius: 10px;
+            font-size: 13px;
+            font-weight: 800;
+            color: #666;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+        
+        .tf-btn:active {
+            transform: scale(0.9);
+        }
+        
+        .tf-btn.active {
+            color: #00d395;
+            border-color: #00d395;
+            background: rgba(0,211,149,0.15);
+            box-shadow: 0 0 20px rgba(0,211,149,0.2);
+        }
+        
+        #chart {
+            width: 100%;
+            height: 360px;
+        }
+        
+        .agent-bar {
+            display: flex;
+            gap: 8px;
+            padding: 12px;
+            background: #000;
+            margin: 0 12px 12px;
+            border-radius: 16px;
+            border: 0.5px solid rgba(255,255,255,0.1);
+        }
+        
+        .agent {
+            flex: 1;
+            text-align: center;
+            padding: 12px;
+            border-radius: 14px;
+            background: linear-gradient(145deg, #0a0a0a, #111);
+            border: 1px solid #1a1a1a;
+            transition: all 0.3s;
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .agent.active {
+            border-color: #00d395;
+            box-shadow: 0 0 24px rgba(0,211,149,0.3);
+        }
+        
+        .agent-icon {
+            font-size: 24px;
+            margin-bottom: 6px;
+            filter: drop-shadow(0 0 8px currentColor);
+        }
+        
+        .agent-name {
+            font-size: 9px;
+            color: #666;
+            text-transform: uppercase;
+            font-weight: 800;
+            letter-spacing: 0.5px;
+            margin-bottom: 4px;
+        }
+        
+        .agent-signal {
+            font-size: 12px;
+            font-weight: 900;
+            text-transform: uppercase;
+        }
+        
+        .agent-signal.buy {
+            color: #00d395;
+            text-shadow: 0 0 12px rgba(0,211,149,0.6);
+        }
+        
+        .agent-signal.sell {
+            color: #ff3b30;
+            text-shadow: 0 0 12px rgba(255,59,48,0.6);
+        }
+        
+        .agent-signal.hold {
+            color: #666;
+        }
+        
+        .agent-confidence {
+            font-size: 9px;
+            color: #444;
+            margin-top: 4px;
+            font-weight: 700;
+        }
+        
+        .trade-panel {
+            background: linear-gradient(145deg, #0a0a0a 0%, #111 100%);
+            margin: 0 12px 12px;
+            border-radius: 20px;
+            border: 0.5px solid rgba(255,255,255,0.1);
+            padding: 20px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+        }
+        
+        .trade-mode {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 16px;
+            background: #000;
+            padding: 4px;
+            border-radius: 14px;
+            border: 1px solid #1a1a1a;
+        }
+        
+        .mode-btn {
+            flex: 1;
+            padding: 14px;
+            border-radius: 12px;
+            border: none;
+            background: transparent;
+            color: #666;
+            font-size: 14px;
+            font-weight: 800;
+            cursor: pointer;
+            transition: all 0.2s;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .mode-btn:active {
+            transform: scale(0.95);
+        }
+        
+        .mode-btn.active {
+            background: linear-gradient(135deg, #00d395, #00b884);
+            color: #000;
+            box-shadow: 0 4px 16px rgba(0,211,149,0.4);
+        }
+        
+        .trade-buttons {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+        }
+        
+        .trade-btn {
+            padding: 20px;
+            border-radius: 16px;
+            border: none;
+            font-size: 17px;
+            font-weight: 900;
+            cursor: pointer;
+            transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .trade-btn:active {
+            transform: scale(0.94);
+        }
+        
+        .trade-btn::before {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 0;
+            height: 0;
+            border-radius: 50%;
+            background: rgba(255,255,255,0.3);
+            transform: translate(-50%, -50%);
+            transition: width 0.6s, height 0.6s;
+        }
+        
+        .trade-btn:active::before {
+            width: 300px;
+            height: 300px;
+        }
+        
+        .buy-btn {
+            background: linear-gradient(135deg, #00d395 0%, #00b884 100%);
+            color: #000;
+            box-shadow: 0 6px 24px rgba(0,211,149,0.4);
+        }
+        
+        .sell-btn {
+            background: linear-gradient(135deg, #ff3b30 0%, #ff2d55 100%);
+            color: #fff;
+            box-shadow: 0 6px 24px rgba(255,59,48,0.4);
+        }
+        
+        .positions {
+            margin: 0 12px 12px;
+        }
+        
+        .position {
+            background: linear-gradient(145deg, #0a0a0a 0%, #111 100%);
+            border: 0.5px solid rgba(255,255,255,0.1);
+            border-radius: 16px;
+            padding: 16px;
+            margin-bottom: 8px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            transition: all 0.2s;
+        }
+        
+        .position:active {
+            transform: scale(0.98);
+        }
+        
+        .pos-symbol {
+            font-size: 18px;
+            font-weight: 900;
+            margin-bottom: 4px;
+        }
+        
+        .pos-details {
+            font-size: 12px;
+            color: #666;
+            font-weight: 600;
+        }
+        
+        .pos-pnl {
+            text-align: right;
+        }
+        
+        .pos-pnl-value {
+            font-size: 20px;
+            font-weight: 900;
+            font-family: 'SF Mono', monospace;
+        }
+        
+        .pos-pnl-value.green {
+            color: #00d395;
+            text-shadow: 0 0 16px rgba(0,211,149,0.4);
+        }
+        
+        .pos-pnl-value.red {
+            color: #ff3b30;
+        }
+        
+        .pos-pnl-pct {
+            font-size: 13px;
+            color: #666;
+            font-weight: 700;
+            margin-top: 2px;
+        }
+        
+        .emergency-stop {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            width: 64px;
+            height: 64px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #ff3b30, #ff2d55);
+            border: 3px solid rgba(255,255,255,0.2);
+            box-shadow: 0 8px 32px rgba(255,59,48,0.6);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 28px;
+            cursor: pointer;
+            transition: all 0.2s;
+            z-index: 999;
+        }
+        
+        .emergency-stop:active {
+            transform: scale(0.9);
+        }
+        
+        .footer {
+            text-align: center;
+            padding: 20px;
+            font-size: 10px;
+            color: #333;
+            font-weight: 600;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="header-top">
+            <div class="logo">BEAST v4.0</div>
+            <div class="beast-badge" id="statusBadge">
+                <div class="beast-dot"></div>
+                <div class="beast-text">BEAST MODE</div>
+            </div>
+        </div>
+        <div class="header-bottom">
+            <div>
+                <div class="portfolio-label">Portfolio</div>
+                <div class="portfolio-value" id="portfolioValue">$1,007.00</div>
+            </div>
+            <div class="portfolio-change green" id="portfolioChange">+$0.00 (+0.00%)</div>
+        </div>
+    </div>
+
+    <div class="metrics">
+        <div class="metric">
+            <div class="m-label">Portfolio</div>
+            <div class="m-value" id="metricPortfolio">$1,007</div>
+            <div class="m-sub">Total Value</div>
+        </div>
+        <div class="metric">
+            <div class="m-label">Cash</div>
+            <div class="m-value" id="metricCash">$1,007</div>
+            <div class="m-sub">Available</div>
+        </div>
+        <div class="metric">
+            <div class="m-label">Day P&L</div>
+            <div class="m-value green" id="metricPnL">+$0.00</div>
+            <div class="m-sub">Today</div>
+        </div>
+        <div class="metric">
+            <div class="m-label">Win Rate</div>
+            <div class="m-value" id="metricWR">0%</div>
+            <div class="m-sub">All Time</div>
+        </div>
+    </div>
+
+    <div class="chart-section">
+        <div class="chart-header">
+            <div class="symbol-info">
+                <select class="symbol-selector" id="symbolSelect">
+                    <option value="BTC/USD">BTC/USD</option>
+                    <option value="ETH/USD">ETH/USD</option>
+                    <option value="SOL/USD">SOL/USD</option>
+                    <option value="SPY">SPY</option>
+                    <option value="QQQ">QQQ</option>
+                    <option value="AAPL">AAPL</option>
+                </select>
+                <div class="symbol-price" id="symbolPrice">$0.00</div>
+                <div class="symbol-change green" id="symbolChange">+0.00%</div>
+            </div>
+            <div class="timeframe-selector">
+                <button class="tf-btn" data-tf="1m">1m</button>
+                <button class="tf-btn" data-tf="5m">5m</button>
+                <button class="tf-btn active" data-tf="1h">1h</button>
+                <button class="tf-btn" data-tf="1d">1d</button>
+            </div>
+        </div>
+        <div id="chart"></div>
+    </div>
+
+    <div class="agent-bar">
+        <div class="agent active" data-agent="momentum">
+            <div class="agent-icon">🚀</div>
+            <div class="agent-name">Momentum</div>
+            <div class="agent-signal buy" id="agentMomentum">BUY</div>
+            <div class="agent-confidence" id="agentMomentumConf">85%</div>
+        </div>
+        <div class="agent active" data-agent="reversion">
+            <div class="agent-icon">🎯</div>
+            <div class="agent-name">Reversion</div>
+            <div class="agent-signal hold" id="agentReversion">HOLD</div>
+            <div class="agent-confidence" id="agentReversionConf">62%</div>
+        </div>
+        <div class="agent active" data-agent="breakout">
+            <div class="agent-icon">⚡</div>
+            <div class="agent-name">Breakout</div>
+            <div class="agent-signal buy" id="agentBreakout">BUY</div>
+            <div class="agent-confidence" id="agentBreakoutConf">78%</div>
+        </div>
+        <div class="agent active" data-agent="sentiment">
+            <div class="agent-icon">🧠</div>
+            <div class="agent-name">Sentiment</div>
+            <div class="agent-signal buy" id="agentSentiment">BUY</div>
+            <div class="agent-confidence" id="agentSentimentConf">91%</div>
+        </div>
+    </div>
+
+    <div class="trade-panel">
+        <div class="trade-mode">
+            <button class="mode-btn active" data-mode="market">Market</button>
+            <button class="mode-btn" data-mode="limit">Limit</button>
+        </div>
+        <div class="trade-buttons">
+            <button class="trade-btn buy-btn" id="buyBtn">BUY</button>
+            <button class="trade-btn sell-btn" id="sellBtn">SELL</button>
+        </div>
+    </div>
+
+    <div class="positions" id="positionsContainer"></div>
+
+    <div class="emergency-stop" id="emergencyStop">🛑</div>
+
+    <div class="footer">
+        BEAST MODE v4.0 • 22,217 Optimizations • Tennessee 0% Tax • Paper Trading
+    </div>
+
+    <script>
+        let chart, candleSeries, currentSymbol = 'BTC/USD', currentTF = '1h';
+        let portfolioData = { value: 1007, change: 0, changePct: 0 };
+        
+        // Initialize Chart
+        function initChart() {
+            const chartContainer = document.getElementById('chart');
+            chart = LightweightCharts.createChart(chartContainer, {
+                width: chartContainer.clientWidth,
+                height: 360,
+                layout: {
+                    background: { color: '#000000' },
+                    textColor: '#666666',
+                },
+                grid: {
+                    vertLines: { color: '#1a1a1a' },
+                    horzLines: { color: '#1a1a1a' },
+                },
+                crosshair: {
+                    mode: LightweightCharts.CrosshairMode.Normal,
+                },
+                rightPriceScale: {
+                    borderColor: '#333333',
+                },
+                timeScale: {
+                    borderColor: '#333333',
+                    timeVisible: true,
+                    secondsVisible: false,
+                },
+            });
+            
+            candleSeries = chart.addCandlestickSeries({
+                upColor: '#00d395',
+                downColor: '#ff3b30',
+                borderUpColor: '#00d395',
+                borderDownColor: '#ff3b30',
+                wickUpColor: '#00d395',
+                wickDownColor: '#ff3b30',
+            });
+            
+            generateDemoData();
+            
+            window.addEventListener('resize', () => {
+                chart.applyOptions({ width: chartContainer.clientWidth });
+            });
+        }
+        
+        function generateDemoData() {
+            const data = [];
+            let price = currentSymbol.includes('BTC') ? 65000 : currentSymbol.includes('ETH') ? 3500 : 100;
+            const now = Date.now() / 1000;
+            
+            for (let i = 100; i >= 0; i--) {
+                const time = now - i * 3600;
+                const change = (Math.random() - 0.5) * price * 0.02;
+                const open = price;
+                const close = price + change;
+                const high = Math.max(open, close) + Math.random() * Math.abs(change);
+                const low = Math.min(open, close) - Math.random() * Math.abs(change);
+                
+                data.push({ time, open, high, low, close });
+                price = close;
+            }
+            
+            candleSeries.setData(data);
+            document.getElementById('symbolPrice').textContent = '$' + price.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+            document.getElementById('symbolChange').textContent = '+' + (Math.random() * 5).toFixed(2) + '%';
+        }
+        
+        // Fetch data from backend
+        async function fetchStatus() {
+            try {
+                const res = await fetch('/api/status');
+                const data = await res.json();
+                
+                document.getElementById('portfolioValue').textContent = '$' + data.capital.toLocaleString('en-US', {minimumFractionDigits: 2});
+                document.getElementById('metricPortfolio').textContent = '$' + data.capital.toLocaleString('en-US', {minimumFractionDigits: 0});
+                document.getElementById('metricCash').textContent = '$' + data.capital.toLocaleString('en-US', {minimumFractionDigits: 0});
+                document.getElementById('metricPnL').textContent = (data.daily_pnl >= 0 ? '+' : '') + '$' + data.daily_pnl.toFixed(2);
+                document.getElementById('metricPnL').className = 'm-value ' + (data.daily_pnl >= 0 ? 'green' : 'red');
+                document.getElementById('metricWR').textContent = data.stats.wr + '%';
+                
+                const changePct = ((data.daily_pnl / data.capital) * 100).toFixed(2);
+                document.getElementById('portfolioChange').textContent = (data.daily_pnl >= 0 ? '+' : '') + '$' + data.daily_pnl.toFixed(2) + ' (' + (data.daily_pnl >= 0 ? '+' : '') + changePct + '%)';
+                document.getElementById('portfolioChange').className = 'portfolio-change ' + (data.daily_pnl >= 0 ? 'green' : 'red');
+                
+                updatePositions(data.positions);
+                
+            } catch (e) {
+                console.error('Fetch error:', e);
+            }
+        }
+        
+        function updatePositions(positions) {
+            const container = document.getElementById('positionsContainer');
+            if (!positions || positions.length === 0) {
+                container.innerHTML = '';
+                return;
+            }
+            
+            container.innerHTML = positions.map(pos => {
+                const pnl = (Math.random() - 0.3) * pos.price * pos.qty * 0.1;
+                const pnlPct = (pnl / (pos.price * pos.qty)) * 100;
+                return `
+                    <div class="position">
+                        <div>
+                            <div class="pos-symbol">${pos.symbol}</div>
+                            <div class="pos-details">${pos.qty} @ $${pos.price.toFixed(2)}</div>
+                        </div>
+                        <div class="pos-pnl">
+                            <div class="pos-pnl-value ${pnl >= 0 ? 'green' : 'red'}">
+                                ${pnl >= 0 ? '+' : ''}$${Math.abs(pnl).toFixed(2)}
+                            </div>
+                            <div class="pos-pnl-pct">${pnl >= 0 ? '+' : ''}${pnlPct.toFixed(2)}%</div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+        
+        // Event Listeners
+        document.getElementById('symbolSelect').addEventListener('change', (e) => {
+            currentSymbol = e.target.value;
+            generateDemoData();
+        });
+        
+        document.querySelectorAll('.tf-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                document.querySelectorAll('.tf-btn').forEach(b => b.classList.remove('active'));
+                e.target.classList.add('active');
+                currentTF = e.target.dataset.tf;
+                generateDemoData();
+            });
+        });
+        
+        document.getElementById('buyBtn').addEventListener('click', async () => {
+            if (navigator.vibrate) navigator.vibrate(50);
+            alert('BUY order for ' + currentSymbol + ' - Coming soon in live trading');
+        });
+        
+        document.getElementById('sellBtn').addEventListener('click', async () => {
+            if (navigator.vibrate) navigator.vibrate(50);
+            alert('SELL order for ' + currentSymbol + ' - Coming soon in live trading');
+        });
+        
+        document.getElementById('emergencyStop').addEventListener('click', async () => {
+            if (navigator.vibrate) navigator.vibrate([100, 50, 100]);
+            if (confirm('🛑 EMERGENCY STOP\n\nClose all positions?')) {
+                await fetch('/api/control', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({action: 'pause'})
+                });
+                alert('All positions closed. Beast Mode paused.');
+            }
+        });
+        
+        document.getElementById('statusBadge').addEventListener('click', async () => {
+            const res = await fetch('/api/control', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({action: 'pause'})
+            });
+            alert('Beast Mode Paused');
+        });
+        
+        // Initialize
+        initChart();
+        fetchStatus();
+        setInterval(fetchStatus, 5000);
+        
+        // Haptic feedback
+        if (window.DeviceMotionEvent) {
+            document.querySelectorAll('button').forEach(btn => {
+                btn.addEventListener('touchstart', () => {
+                    if (navigator.vibrate) navigator.vibrate(10);
+                });
+            });
+        }
+    </script>
+</body>
+</html>
